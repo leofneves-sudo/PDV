@@ -2,6 +2,7 @@ const {parentPort}=require('node:worker_threads');
 const {db}=require('./db');
 const reports=require('./reports');
 const management=require('./management');
+const insights=require('./stock-insights');
 
 function execute(path,actor,rawQuery) {
   const query=new URLSearchParams(rawQuery);
@@ -13,6 +14,8 @@ function execute(path,actor,rawQuery) {
       case 'filters': result=reports.filters(actor); break;
       case 'dashboard': result=reports.dashboard(actor,query); break;
       case 'management': result=management.management(actor,query); break;
+      case 'stock-insights': result=insights.analyzeStock(actor,query); break;
+      case 'stock-insights.csv': result=insights.insightsCsv(insights.analyzeStock(actor,query)); break;
       case 'dashboard.csv': result=reports.dashboardCsv(reports.dashboard(actor,query)); break;
       case 'history.csv': result=reports.historyCsv(actor,query); break;
       case 'management.csv': result=management.managementCsv(management.management(actor,query,true)); break;

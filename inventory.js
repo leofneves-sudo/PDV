@@ -19,8 +19,9 @@ function saveSupplier(actor,body,id) {
   });
 }
 function recordReceipt(actor,body,source) {
-  const product=record(get('SELECT id,stock,active FROM products WHERE id=?',body.product),'Produto');
+  const product=record(get('SELECT id,name,category,expires_on,stock,active FROM products WHERE id=?',body.product),'Produto');
   if (!product.active) fail('Selecione um produto ativo.');
+  ops.assertSaleable(product);
   const quantity=integer(body.quantity,'Quantidade',1,1000000);
   const unitCost=integer(body.cost,'Custo unitário');
   const total=integer(quantity*unitCost,'Custo total',0,Number.MAX_SAFE_INTEGER);
@@ -100,6 +101,9 @@ function breakpack(actor,body) {
     const source=record(get(`${ops.catalog} WHERE p.id=?`,body.source),'Produto de origem');
     const target=record(get(`${ops.catalog} WHERE p.id=?`,body.target),'Produto de destino');
     if (source.id===target.id || !source.active || !target.active) fail('Escolha dois produtos ativos diferentes.');
+    ops.assertSaleable(source);
+    ops.assertSaleable(target);
+    if (source.expires_on!==target.expires_on) fail('Para desmembrar produtos com validade, use a mesma data na origem e no destino.');
     const consumed=integer(body.consumed,'Unidades consumidas',1,1000000);
     const per=integer(body.per,'Unidades por embalagem',1,1000000);
     const produced=integer(consumed*per,'Unidades resultantes',1,1000000000);
@@ -138,6 +142,34 @@ function favorite(actor,id,body) {
     if (active!==before) audit(actor,'produto.favorito','produto',id,{favorite:before},{favorite:active});
     return {id,active};
   });
+}
+function expiryLoss(actor,id,body) {
+  if (!can(actor,'stock')) {
+    allow(actor,'operate');
+    actor=authorize(actor,body,'stock','produto',id);
+  }
+  return tx(()=>{
+    const product=record(get(`${ops.catalog} WHERE p.id=?`,id),'Produto');
+    if (product.stock!==body.expected_stock || product.expires_on!==body.expected_expiry) fail('O estoque ou a validade mudou. Atualize a ficha antes de registrar a perda.',409);
+    if (!product.expires_on && !ops.productView(product,actor).expiry.blocked) fail('Este produto não tem controle de validade.');
+    const quantity=integer(body.quantity,'Quantidade perdida',1,product.stock);
+    if (quantity>product.stock-product.reserved) fail('Há unidades reservadas. Remova os itens das comandas antes de registrar a perda.',409);
+    const reason=required(body.reason,'Motivo da perda',400,3);
+    approveLog(actor,'produto',id,reason);
+    ops.stockMove(actor,product,-quantity,reason,'expiry_loss',null);
+    audit(actor,'estoque.perda_validade','produto',id,{stock:product.stock,expires_on:product.expires_on},
+      {stock:product.stock-quantity,quantity,expires_on:product.expires_on},reason);
+    return ops.productView(get(`${ops.catalog} WHERE p.id=?`,id),actor);
+  });
+}
+function expiryCsv(actor) {
+  if (!can(actor,'stock')) allow(actor,'products');
+  const rows=[['Código','Produto','Categoria','Validade','Situação','Dias para vencer','Estoque','Reservado','Livre','Custo do estoque (R$)']];
+  for (const product of ops.products(actor).filter(row=>row.stock>0 && row.expiry.status!=='none').sort((a,b)=>(a.expires_on || '').localeCompare(b.expires_on || ''))) {
+    rows.push([product.code,product.name,product.category,product.expires_on || '',product.expiry.label,product.expiry.days,
+      product.stock,product.reserved,product.available,product.stock_value==null?'':(product.stock_value/100).toFixed(2).replace('.',',')]);
+  }
+  return rows.map(row=>row.map(value=>'"'+String(value ?? '').replace(/^[=+@\-]/,"'$&").replaceAll('"','""')+'"').join(';')).join('\r\n');
 }
 
 function parseCsv(text) {
@@ -215,6 +247,7 @@ function importPlan(actor,body) {
         barcode:columns.includes('codigo_barras')?barcode:old?.barcode ?? null,active:old?!!old.active:true,
         reason:'Importação CSV'
       };
+      product.expires_on=ops.productExpiry(product.category,columns.includes('validade')?data.validade:old?.expires_on);
       plan.push({line:index+2,old,product});
     } catch (error) {
       if (!error.status) throw error;
@@ -242,4 +275,4 @@ function applyImport(actor,body) {
     return {applied:plan.length};
   });
 }
-module.exports={suppliers,saveSupplier,receive,correctTrade,count,breakpack,history,favorite,previewImport,applyImport};
+module.exports={suppliers,saveSupplier,receive,correctTrade,count,breakpack,history,favorite,previewImport,applyImport,expiryLoss,expiryCsv};

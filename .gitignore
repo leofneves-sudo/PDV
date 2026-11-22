@@ -1,5 +1,14 @@
 node_modules/
+test-output/
 data/
 *.pem
 *.key
+*.pfx
+*.p12
+*.sqlite
+*.sqlite-*
+*.log
+.env
+.env.*
+!.env.example
 .DS_Store

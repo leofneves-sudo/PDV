@@ -1,5 +1,6 @@
 import {h,icon,btn,empty,lab,input,textarea,select,moneyInput,money,num,dt,cardNumber,badge,normalize} from './ui.js';
 import {permissionsFor} from './views.js';
+import {needsExpiry as productNeedsExpiry} from './expiry.mjs';
 
 const reason = (label='Motivo',attrs='required minlength="3"') => lab(label,textarea('reason','',`rows="2" maxlength="400" ${attrs}`),'span-two');
 const numberInput = (name,value='',attrs='') => input(name,value,'inputmode="numeric" type="number" step="1" '+attrs);
@@ -29,6 +30,7 @@ export function productForm(product,state) {
     lab('Categoria',input('category',p.category,'required maxlength="80" list="existing-categories"')+
       `<datalist id="existing-categories">${[...new Set(state.products.map(item=>item.category))].map(name=>`<option value="${h(name)}"></option>`).join('')}</datalist>`)+
     activeField(p.active ?? true)+
+    lab('Data de validade',input('expires_on',p.expires_on,'type="date" '+(productNeedsExpiry(p.category)?'required':''))+`<small data-expiry-hint>${productNeedsExpiry(p.category)?'Obrigatória para alimentação e bebidas.':'Opcional para outras categorias.'}</small>`)+
     lab('Preço de venda',moneyInput('price',p.price,'required'))+lab('Custo (opcional)',moneyInput('cost',p.cost))+
     (!p.id && permissionsFor(state,'stock') ? lab('Estoque inicial',numberInput('stock',0,'min="0" max="1000000" required')):'')+
     lab('Estoque mínimo',numberInput('minimum',p.minimum ?? 0,'min="0" max="1000000" required'))+
@@ -38,7 +40,12 @@ export function productForm(product,state) {
      ${lab('Acabamento',select('foil',[['foil','Foil'],['normal','Normal']],p.foil==null?'':p.foil?'foil':'normal','Sem classificação'))}</div></details>`+
     lab('Imagem (opcional)',input('image','','type="file" accept="image/png,image/jpeg,image/webp,image/gif"'),'span-two')+
     (p.image?'<label class="toggle-row span-two"><input type="checkbox" name="removeImage"> Remover imagem atual</label>':'')+
-    (p.id?reason('Motivo (obrigatório para preço, custo ou status)',''):''));
+    (p.id?reason('Motivo (obrigatório para preço, custo, status ou validade em estoque)',''):''));
+}
+export function updateProductExpiry(form) {
+  const required=productNeedsExpiry(form.elements.category.value);
+  form.elements.expires_on.required=required;
+  form.querySelector('[data-expiry-hint]').textContent=required?'Obrigatória para alimentação e bebidas.':'Opcional para outras categorias.';
 }
 export function stockForm(product) {
   return form('stock',identity(product.id)+
@@ -46,9 +53,16 @@ export function stockForm(product) {
     lab('Movimento',select('direction',[['in','Entrada'],['out','Saída']],'in'))+
     lab('Quantidade',numberInput('quantity','','required min="1" max="1000000" autofocus'))+reason()+adminConfirm(),submit('Registrar movimento'));
 }
+export function expiryLossForm(product) {
+  return form('expiry-loss',identity(product.id)+
+    `<p class="dialog-note span-two">${h(product.name)} · Validade: ${product.expires_on?h(product.expires_on.split('-').reverse().join('/')):'Não cadastrada'}. Estoque físico: ${num(product.stock)} un.; reservadas: ${num(product.reserved)} un. Retire fisicamente os produtos separados para perda.</p>`+
+    input('expected_stock',product.stock,'type="hidden"')+input('expected_expiry',product.expires_on ?? '','type="hidden"')+
+    lab('Quantidade perdida',numberInput('quantity','','min="1" max="'+product.available+'" required autofocus'))+
+    reason('Motivo da perda')+adminConfirm(),submit('Registrar perda','danger'));
+}
 export function movementsView(rows,counts=[]) {
   const movements=rows.length?`<div class="table-scroll"><table><thead><tr><th>Data</th><th>Variação</th><th>Antes / depois</th><th>Responsável e motivo</th></tr></thead><tbody>
-    ${rows.map(row=>`<tr><td>${dt(row.created_at)}</td><td>${row.amount>0?'+':''}${num(row.amount)}</td><td>${num(row.before)} / ${num(row.after)}</td><td><strong>${h(row.user_name)}</strong><small>${h(row.reason)}</small></td></tr>`).join('')}</tbody></table></div>`:empty('box','Nenhuma movimentação');
+    ${rows.map(row=>`<tr><td>${dt(row.created_at)}</td><td>${row.amount>0?'+':''}${num(row.amount)}${row.kind==='expiry_loss'?`<small>${badge('cancelled','Perda por validade')}</small>`:''}</td><td>${num(row.before)} / ${num(row.after)}</td><td><strong>${h(row.user_name)}</strong><small>${h(row.reason)}</small></td></tr>`).join('')}</tbody></table></div>`:empty('box','Nenhuma movimentação');
   const records=counts.length?`<h3>Conferências físicas</h3><div class="mini-list">${counts.map(row=>`<div>
     <span><strong>${dt(row.created_at)} · ${h(row.user_name)}</strong><small>${h(row.reason)}</small></span>
     <b>Registrado: ${num(row.expected)} · Contado: ${num(row.counted)}</b></div>`).join('')}</div>`:'';
@@ -158,7 +172,7 @@ export function paymentView(order,cfg) {
     ${order.payments.length?`<h3>Parcelas registradas</h3><div class="mini-list">
       ${order.payments.map(payment=>`<div><span><strong>${h(cfg.methods[payment.method])} · ${states[payment.state]}</strong>
         <small>${h(payment.payer || 'Sem nome')}${payment.shift_id?' · Turno #'+payment.shift_id:''}${payment.method==='cash'?' · Troco '+money(payment.change):''}</small></span><b>${money(payment.amount)}</b>
-        ${payment.state==='pending'?btn('Confirmar PIX','ext-payment-pix',{attrs:`data-id="${payment.id}"`}):''}
+        ${payment.state==='pending'?btn('Confirmar PIX','ext-payment-pix',{attrs:`data-id="${payment.id}" ${order.sale_blocks?.length?'disabled':''}`}):''}
         ${payment.state==='void'?'':btn('Cancelar parcela','ext-payment-void',{attrs:`data-id="${payment.id}"`})}</div>`).join('')}</div>`:''}
     ${open>0 ? `<div class="payment-inputs">
       ${lab('Pessoa que paga esta parcela (opcional)',input('payer','','maxlength="100" placeholder="Ex. Ana"'))}
@@ -184,7 +198,7 @@ export function paymentView(order,cfg) {
 }
 function orderData(order,cfg,print=false) {
   return `<div class="${print?'receipt-print':'order-detail'}">
-    ${print?'<h2>Balcão PDV</h2><p>Comprovante não fiscal</p>':badge(order.status)}
+    ${print?'<h2>Last Place PDV</h2><p>Comprovante não fiscal</p>':badge(order.status)}
     <p><strong>Atendimento #${order.id} · Cartão #${cardNumber(order.number)}</strong></p>
     <div class="detail-meta"><span>Abertura <strong>${dt(order.opened_at)} · ${h(order.opened_name)}</strong></span>
     <span>Encerramento <strong>${dt(order.ended_at)} · ${h(order.ended_name)}</strong></span>

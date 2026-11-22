@@ -243,12 +243,12 @@ export async function act(ctx,key,element) {
         `<p class="dialog-note span-two">${text(product.name)} · Estoque registrado de ${product.stock} · ${product.reserved} reservadas</p>`+
         lab('Total físico contado',qty('counted',product.stock))+reason()+modals.adminConfirm(),'Salvar contagem'),{product});
     case 'breakpack':
-      return show('Desmembrar produto',form('breakpack',field('Produto consumido','source',state.products.filter(row=>row.active).map(row=>[row.id,row.name]),id)+
+      return show('Desmembrar produto',form('breakpack',`<p class="dialog-note span-two">Produtos com validade precisam estar dentro do prazo e ter a mesma data na origem e no destino.</p>`+field('Produto consumido','source',state.products.filter(row=>row.active).map(row=>[row.id,row.name]),id)+
         field('Produto gerado','target',state.products.filter(row=>row.active).map(row=>[row.id,row.name]))+
         lab('Embalagens consumidas',qty('consumed',1,'required min="1"'))+lab('Unidades por embalagem',qty('per','','required min="1"'))+
         reason(),'Registrar desmembramento'));
     case 'import':
-      return show('Importar produtos e estoque',form('import',`<p class="dialog-note span-two">Colunas obrigatórias: codigo, nome, categoria, preco, estoque. Opcionais: codigo_barras, custo, minimo. Use vírgula ou ponto e vírgula como separador.</p>`+
+      return show('Importar produtos e estoque',form('import',`<p class="dialog-note span-two">Colunas obrigatórias: codigo, nome, categoria, preco, estoque. Opcionais: codigo_barras, custo, minimo, validade. Para alimentação e bebidas, informe validade no formato AAAA-MM-DD. Use vírgula ou ponto e vírgula como separador.</p>`+
         field('Modo','mode',[['create','Criar'],['update','Atualizar'],['both','Criar e atualizar']],'both',null)+
         lab('Arquivo CSV',input('csv','','type="file" accept=".csv,text/csv" required'),'span-two'),'Ver prévia'));
     case 'favorite': {

@@ -1,13 +1,15 @@
-const {get,all,run,idOf,tx,fail,record,integer,required,optional,now,sha,randomUUID,methods,origins,can,allow,audit} = require('./db');
+const {get,all,run,idOf,tx,fail,record,integer,required,optional,now,sha,randomUUID,methods,origins,can,allow,audit,findSession} = require('./db');
 
 const {authorize,approveLog,currentShift}=require('./cash');
 const {portion}=require('./amount');
-const catalog = `SELECT p.id,p.code,p.barcode,p.name,p.category,p.price,p.cost,p.stock,p.minimum,p.image_hash,p.active,p.stock_value,p.game,p.collection,p.collector_number,p.language,p.condition,p.rarity,p.foil,COALESCE((SELECT SUM(i.quantity) FROM items i JOIN orders o ON o.id=i.order_id
+const {needsExpiry,expiryInfo,storeDay}=require('./expiry.mjs');
+const today=()=>storeDay(Date.now(),process.env.PDV_TIMEZONE || 'America/Sao_Paulo');
+const catalog = `SELECT p.id,p.code,p.barcode,p.name,p.category,p.expires_on,p.price,p.cost,p.stock,p.minimum,p.image_hash,p.active,p.stock_value,p.game,p.collection,p.collector_number,p.language,p.condition,p.rarity,p.foil,COALESCE((SELECT SUM(i.quantity) FROM items i JOIN orders o ON o.id=i.order_id
   WHERE i.product_id=p.id AND o.status='open'),0) reserved FROM products p`;
 function productView(product,actor) {
   const {image_hash,...fields}=product;
   const data = {...fields,image:image_hash ? `/api/products/${product.id}/image?v=${image_hash}` : null,
-    available:product.stock-product.reserved};
+    available:product.stock-product.reserved,expiry:expiryInfo(product,today())};
   if (!can(actor,'products') && !can(actor,'stock') && !can(actor,'suppliers')) {delete data.cost;delete data.stock_value;}
   return data;
 }
@@ -22,7 +24,20 @@ function productImage(actor,id) {
   if (!manage) allow(actor,'operate');
   return record(get('SELECT image,image_hash FROM products WHERE id=? AND image IS NOT NULL AND (?=1 OR active=1)',id,Number(manage)),'Imagem');
 }
+function assertSaleable(product) {
+  const expiry=expiryInfo(product,today());
+  if (expiry.blocked) fail(`${product.name}: ${expiry.reason}`,409);
+}
+function orderSaleBlocks(id) {
+  return all(`SELECT DISTINCT p.id,p.name,p.category,p.expires_on FROM items i JOIN products p ON p.id=i.product_id WHERE i.order_id=?`,id)
+    .map(product=>({...product,expiry:expiryInfo(product,today())})).filter(product=>product.expiry.blocked);
+}
+function assertOrderSaleable(id) {
+  const blocked=orderSaleBlocks(id);
+  if (blocked.length) fail(`Venda bloqueada: ${blocked.map(product=>product.name).join(', ')}. Remova os produtos vencidos ou regularize as validades ausentes.`,409);
+}
 function stockMove(actor,product,amount,reason,kind,order=null,details={}) {
+  if (kind==='sale') assertSaleable(record(get('SELECT name,category,expires_on FROM products WHERE id=?',product.id),'Produto'));
   const current=record(get('SELECT stock,cost,stock_value FROM products WHERE id=?',product.id),'Produto');
   const next=integer(current.stock+amount,'Estoque após movimentação',0,1_000_000_000);
   const before=current.stock_value;
@@ -51,6 +66,14 @@ function imageValue(value) {
   if (image && !/^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(image)) fail('Use uma imagem PNG, JPEG, WebP ou GIF.');
   return image;
 }
+function productExpiry(category,value) {
+  const required=needsExpiry(category);
+  if (!value) {
+    if (required) fail('Informe a data de validade para produtos de alimentação ou bebidas.');
+    return null;
+  }
+  return dateValue(value,'Data de validade');
+}
 function saveProduct(actor,body,id) {
   allow(actor,'products');
   return tx(() => {
@@ -61,22 +84,24 @@ function saveProduct(actor,body,id) {
     if (barcode && get('SELECT id FROM products WHERE barcode=? AND id<>?',barcode,id || 0)) fail('Código de barras já utilizado.',409);
     const name = required(body.name,'Nome',120);
     const category = required(body.category,'Categoria',80);
+    const expiresOn = productExpiry(category,Object.hasOwn(body,'expires_on') ? body.expires_on : old?.expires_on);
     const price = integer(body.price,'Preço');
     const cost = body.cost == null ? null : integer(body.cost,'Custo');
     const minimum = integer(body.minimum,'Estoque mínimo',0,1_000_000);
     const active = body.active === false ? 0 : 1;
     const image = Object.hasOwn(body,'image') ? imageValue(body.image) : old?.image ?? null;
     const imageHash=image ? sha(image).slice(0,24) : null;
-    const reason = old && (old.price !== price || old.cost !== cost || old.active !== active)
-      ? required(body.reason,'Motivo da alteração de preço, custo ou status',400,3) : null;
+    if (old && old.stock>0 && old.expires_on!==expiresOn && get(`SELECT i.id FROM items i JOIN orders o ON o.id=i.order_id WHERE i.product_id=? AND o.status='open' LIMIT 1`,id)) fail('Remova as reservas antes de alterar a validade.',409);
+    const reason = old && (old.price !== price || old.cost !== cost || old.active !== active || old.stock>0 && (old.expires_on!==expiresOn || needsExpiry(old.category)!==needsExpiry(category)))
+      ? required(body.reason,'Motivo da alteração de preço, custo, status ou validade',400,3) : null;
     if (old) {
-      run('UPDATE products SET code=?,barcode=?,name=?,category=?,price=?,cost=?,minimum=?,active=?,image=?,image_hash=? WHERE id=?',
-        code,barcode,name,category,price,cost,minimum,active,image,imageHash,id);
+      run('UPDATE products SET code=?,barcode=?,name=?,category=?,expires_on=?,price=?,cost=?,minimum=?,active=?,image=?,image_hash=? WHERE id=?',
+        code,barcode,name,category,expiresOn,price,cost,minimum,active,image,imageHash,id);
     } else {
       const initial = integer(body.stock ?? 0,'Estoque inicial',0,1_000_000);
       if (initial > 0) allow(actor,'stock');
-      id = idOf(run(`INSERT INTO products(code,barcode,name,category,price,cost,stock,minimum,active,image,image_hash)
-        VALUES(?,?,?,?,?,?,0,?,?,?,?)`,code,barcode,name,category,price,cost,minimum,active,image,imageHash));
+      id = idOf(run(`INSERT INTO products(code,barcode,name,category,expires_on,price,cost,stock,minimum,active,image,image_hash)
+        VALUES(?,?,?,?,?,?,?,0,?,?,?,?)`,code,barcode,name,category,expiresOn,price,cost,minimum,active,image,imageHash));
       if (initial) stockMove(actor,{id,stock:0},initial,'Saldo inicial do cadastro','initial');
     }
     if (old && old.cost!==cost) run('UPDATE products SET stock_value=? WHERE id=?',cost==null?null:cost*old.stock,id);
@@ -99,6 +124,7 @@ function adjustStock(actor,id,body) {
     const product = record(get(`${catalog} WHERE p.id=?`,id),'Produto');
     const delta = integer(body.delta,'Quantidade',-1_000_000,1_000_000);
     if (!delta) fail('Informe uma quantidade diferente de zero.');
+    if (delta>0) assertSaleable(product);
     if (product.stock+delta < product.reserved) fail('A movimentação deixaria o estoque abaixo das reservas.',409);
     const reason=required(body.reason,'Motivo',400,3);
     approveLog(actor,'produto',id,reason);
@@ -272,10 +298,24 @@ function cardFromCode(code) {
 function grantCard(session,card) {
   run('INSERT OR IGNORE INTO scan_grants(session_id,card_id) VALUES(?,?)',session,card);
 }
+function cardSessions(actor) {
+  const peers=all('SELECT terminal id FROM pairings WHERE reader=? UNION SELECT reader id FROM pairings WHERE terminal=?',actor.session_id,actor.session_id);
+  return [actor.session_id,...peers.map(row=>findSession(row.id)).filter(user=>user && can(user,'operate')).map(user=>user.session_id)];
+}
+function openCards(actor) {
+  allow(actor,'operate');
+  const sessions=cardSessions(actor);
+  const cards=all(`SELECT DISTINCT c.id,c.number,o.id order_id FROM orders o JOIN cards c ON c.id=o.card_id
+    JOIN scan_grants g ON g.card_id=c.id WHERE o.status='open' AND c.active=1 AND c.blocked=0
+    AND g.session_id IN (${sessions.map(()=>'?').join(',')}) ORDER BY o.id DESC`,...sessions);
+  return {total:get("SELECT COUNT(*) n FROM orders WHERE status='open'").n,cards};
+}
 function authorizedCard(actor,id) {
   allow(actor,'operate');
+  const sessions=cardSessions(actor);
   const card = get(`SELECT c.id,c.number FROM cards c JOIN scan_grants g ON g.card_id=c.id
-    WHERE c.id=? AND c.active=1 AND c.blocked=0 AND g.session_id=?`,id,actor.session_id);
+    WHERE c.id=? AND c.active=1 AND c.blocked=0 AND g.session_id IN (${sessions.map(()=>'?').join(',')})
+    AND (g.session_id=? OR EXISTS(SELECT 1 FROM orders o WHERE o.card_id=c.id AND o.status='open'))`,id,...sessions,actor.session_id);
   if (!card) fail('Leia o QR Code do cartão para acessar a comanda.',403);
   return card;
 }
@@ -301,7 +341,7 @@ function orderDetail(actor,order) {
   const returns=order.status==='open'?[]:all('SELECT * FROM returns WHERE order_id=? ORDER BY id',order.id).map(entry=>({...entry,items:all(costsVisible?'SELECT * FROM return_items WHERE return_id=?':
     'SELECT return_id,item_id,quantity,amount,restock FROM return_items WHERE return_id=?',entry.id),payments:all(`SELECT r.*,p.method FROM payment_reversals r JOIN payments p ON p.id=r.payment_id WHERE r.return_id=?`,entry.id)}));
   const transferredPayments=order.merged_into?all('SELECT id,order_id,method,amount,shift_id FROM payments WHERE original_order_id=? AND order_id<>?',order.id,order.id):[];
-  return {...data,items:lines,confirmed,pending,returns,transferredPayments,subtotal:order.subtotal ?? info.subtotal,units:info.units,
+  return {...data,items:lines,confirmed,pending,returns,transferredPayments,sale_blocks:order.status==='open'?orderSaleBlocks(order.id):[],subtotal:order.subtotal ?? info.subtotal,units:info.units,
     total:order.total ?? Math.max(0,info.subtotal-order.discount),
     balance:order.status === 'open' && order.customer_id ? balance(order.customer_id) : 0,
     payments};
@@ -367,8 +407,9 @@ function orderItem(actor,id,body) {
         if (!quantity || !can(actor,'item_reduce')) allow(actor,'item_remove');
         reason = !quantity ? required(body.reason,'Motivo da remoção',400,3) :
           optional(body.reason,'Motivo da redução',400) || 'Redução de quantidade no atendimento';
-      } else if (!product.active || product.stock-product.reserved < delta) {
-        fail(product.active ? 'Estoque disponível insuficiente.' : 'Produto inativo.',409);
+      } else {
+        assertSaleable(product);
+        if (!product.active || product.stock-product.reserved < delta) fail(product.active ? 'Estoque disponível insuficiente.' : 'Produto inativo.',409);
       }
       if (!quantity) {
         run('DELETE FROM items WHERE id=?',item.id);
@@ -449,6 +490,6 @@ function historyOrder(actor,id) {
   if (!can(actor,'history_all') && !ownsOrder(actor,order)) fail('Atendimento de outro turno.',403);
   return order;
 }
-module.exports = {products,productImage,saveProduct,adjustStock,customers,customerDetail,saveCustomer,deposit,reverseDeposit,correctDeposit,
-  dateValue,createCards,changeCard,cardList,cardFromCode,grantCard,cardDetail,openOrder,orderItem,updateOrder,
+module.exports = {products,productImage,saveProduct,productExpiry,assertSaleable,assertOrderSaleable,adjustStock,customers,customerDetail,saveCustomer,deposit,reverseDeposit,correctDeposit,
+  dateValue,createCards,changeCard,cardList,cardFromCode,grantCard,cardDetail,openCards,openOrder,orderItem,updateOrder,
   cancel,historyOrder,recentShift,orderDetail,orderQuery,stockMove,ledgerEntry,balance,catalog,productView,openForEdit,totals,bump,booked,enforceBooked};

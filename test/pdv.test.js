@@ -17,6 +17,7 @@ async function launch(db,extra={}) {
     stdio:['ignore','pipe','pipe']
   });
   let stderr='';
+  const exited=once(child,'exit');
   child.stderr.on('data',chunk=>stderr+=chunk);
   const url=await new Promise((resolve,reject)=>{
     child.stdout.on('data',chunk=>{
@@ -27,10 +28,9 @@ async function launch(db,extra={}) {
     child.once('exit',code=>reject(new Error(`Servidor encerrou com código ${code}. ${stderr}`)));
   });
   return {url,async stop(){
-    if (child.exitCode!==null) return;
-    const exit=once(child,'exit');
+    if (child.exitCode!==null || child.signalCode!==null) return;
     child.kill('SIGTERM');
-    await exit;
+    await exited;
   }};
 }
 
@@ -184,13 +184,17 @@ test('HTTP, QR, concorrência, pagamentos, permissões e persistência', {timeou
   assert.equal((await mobile.request('pairing/link',{code:pairing.code})).reader.name,'Caixa de teste');
   await other.request('pairing/link',{code:pairing.code},409);
   const started=performance.now();
-  assert.equal((await mobile.request('scan',{code,mode:'paired'})).sent,true);
+  const pairedScan=await mobile.request('scan',{code,mode:'paired'});
+  assert.equal(pairedScan.sent,true);
+  assert.equal(pairedScan.card.id,card.id);
   assert.equal((await terminal.until('card')).id,card.id);
   assert.ok(performance.now()-started<1000,'a entrega ao caixa na rede local deve levar menos de 1s');
   assert.ok(!unrelated.history.some(event=>event.name==='card'));
   assert.ok(!reader.history.some(event=>event.name==='card'));
-  await mobile.request(`cards/${card.id}`,undefined,403);
+  assert.equal((await mobile.request(`cards/${card.id}`)).number,card.number);
+  await mobile.request(`cards/${second.id}`,undefined,403);
   const opened=(await admin.request(`cards/${card.id}/open`,{})).order;
+  assert.equal((await mobile.request(`cards/${card.id}`)).order.id,opened.id);
   assert.equal((await mobile.request('scan',{code,mode:'direct'})).order.id,opened.id);
   assert.equal((await mobile.request(`cards/${card.id}/open`,{})).order.id,opened.id);
 
@@ -708,14 +712,14 @@ test('20 mil vendas e mil produtos com relatórios e leitura QR em paralelo',{ti
   const image=await admin.raw(`cards/${readCard.id}/qr`);
   const qr=await decodeQR(Buffer.from(await image.arrayBuffer()));
   const dates='period=custom&start=2026-06-01&end=2026-06-02';
-  const paths=[`dashboard?${dates}`,`management?${dates}`,'history?q=jose&register=1','history.csv?start=2026-06-01&end=2026-06-02'];
+  const paths=[`dashboard?${dates}`,`management?${dates}`,'history?q=jose&register=1','history.csv?start=2026-06-01&end=2026-06-02','stock-insights','stock-insights.csv'];
   await admin.request('filters');
   const endedReports=new Set();
   const loadAt=performance.now();
   const jobs=paths.map(async path=>{
     const response=await admin.raw(path);
     assert.equal(response.status,200);
-    const value=path.startsWith('history.csv')?await response.text():await response.json();
+    const value=path.split('?')[0].endsWith('.csv')?await response.text():await response.json();
     endedReports.add(path);
     return value;
   });
@@ -729,7 +733,7 @@ test('20 mil vendas e mil produtos com relatórios e leitura QR em paralelo',{ti
   await admin.request(`cards/${readCard.id}`);
   const latency=performance.now()-at;
   assert.ok(latency<1000,`leitura com relatório demorou ${latency.toFixed(1)} ms`);
-  const [dashboard,management,history,csv]=await pending;
+  const [dashboard,management,history,csv,insights,insightsCsv]=await pending;
   assert.equal(dashboard.indicators.grossOrders,20000);
   assert.equal(dashboard.indicators.grossSales,20_000_000);
   assert.equal(dashboard.indicators.profit,13_340_000);
@@ -739,8 +743,12 @@ test('20 mil vendas e mil produtos com relatórios e leitura QR em paralelo',{ti
   assert.equal(history.total,20000);
   assert.equal(history.rows.length,50);
   assert.equal(csv.split('\r\n').length,20001);
+  assert.equal(insights.mode,'local');
+  assert.equal(insights.rows.length,1000);
+  assert.ok(insights.rows.every(row=>row.stock===30 && row.available===30));
+  assert.equal(insightsCsv.split('\r\n').length,1001);
   assert.equal((await admin.request(`history?product=1&register=1&shift=${till.id}`)).total,20);
-  t.diagnostic(`QR pareado com consulta à comanda: ${latency.toFixed(1)} ms. Quatro relatórios concorrentes: ${(performance.now()-loadAt).toFixed(1)} ms.`);
+  t.diagnostic(`QR pareado com consulta à comanda: ${latency.toFixed(1)} ms. ${paths.length} relatórios concorrentes: ${(performance.now()-loadAt).toFixed(1)} ms.`);
 });
 
 test('o navegador retoma a intenção após perder a resposta e abre Atendimento para o operador',async t=>{

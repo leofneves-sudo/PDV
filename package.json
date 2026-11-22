@@ -6,7 +6,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "iniciar": "node scripts/start-pdv.cjs",
+    "atalho": "node scripts/create-shortcut.cjs",
     "test": "node --test",
+    "test:mobile": "node scripts/check-mobile.cjs",
     "celular": "node scripts/celular.cjs",
     "restaurar": "node scripts/restore.cjs"
   },
@@ -14,10 +17,12 @@
     "node": ">=24"
   },
   "dependencies": {
+    "node-forge": "1.4.3",
     "qr-scanner": "1.4.2",
     "qrcode": "1.5.4"
   },
   "devDependencies": {
+    "playwright-core": "1.65.1",
     "pngjs": "5.0.0"
   }
 }

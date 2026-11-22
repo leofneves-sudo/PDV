@@ -1,4 +1,4 @@
-# Balcão PDV
+# Last Place PDV
 
 PDV local para loja física, com atendimento touchscreen, cartões QR reutilizáveis e leitura contínua pelo celular. A instalação começa com o banco vazio. Os cadastros e as vendas são gravados em SQLite.
 
@@ -11,9 +11,21 @@ npm ci
 npm start
 ```
 
+### Iniciar pela Área de Trabalho no Windows
+
+Execute `npm run atalho` uma vez para criar **Iniciar Last Place PDV** na Área de Trabalho do usuário. Dê dois cliques no atalho para iniciar os servidores do computador e do celular em segundo plano e abrir `http://localhost:3000` no navegador padrão. O iniciador aguarda os dois serviços responderem e reutiliza os que já estiverem ligados. Cliques simultâneos não criam instâncias duplicadas.
+
+O repositório inclui uma cópia do atalho original em [`atalhos/Iniciar Last Place PDV.lnk`](atalhos/Iniciar%20Last%20Place%20PDV.lnk). Esse arquivo aponta para a pasta deste computador. Em outro computador, gere um atalho próprio com `npm run atalho`. Também é possível dar dois cliques em [`Iniciar Last Place PDV.cmd`](Iniciar%20Last%20Place%20PDV.cmd), mantendo esse arquivo na raiz do projeto, junto da pasta `scripts`.
+
+O IP da rede local é identificado automaticamente. Os endereços ficam em `data/inicializador/enderecos.txt`; registros de inicialização e eventuais erros ficam na mesma pasta. O celular deve estar na mesma rede e confiar no certificado público do PDV. O iniciador mantém a verificação dos certificados HTTPS e não encerra processos já existentes. Se mover a pasta do projeto, execute `npm run atalho` novamente depois de remover o atalho antigo.
+
+Também é possível iniciar os dois serviços pelo terminal com `npm run iniciar`. O atalho apenas inicia os serviços quando aberto; ele não configura inicialização automática com o Windows.
+
+### Configuração inicial
+
 1. Abra `http://localhost:3000` no computador do servidor. Crie o primeiro administrador com uma senha de pelo menos dez caracteres. A criação inicial só está disponível no próprio servidor, usando localhost.
 2. Em **Operadores**, crie uma conta individual para cada funcionário. O perfil Operador recebe as permissões de atendimento, pagamento, consulta e cadastro de clientes e histórico do próprio turno. Ajuste as permissões por ação antes de entregar os acessos. Conceda a consulta do extrato de créditos aos operadores que precisarem conferir os lançamentos.
-3. Cadastre os produtos com o preço, a categoria e o estoque inicial. Use **Movimentar estoque** para entradas e saídas posteriores.
+3. Cadastre os produtos com o preço, a categoria e o estoque inicial. Produtos das categorias Alimentação, Alimentos ou Bebidas (inclusive categorias combinadas) exigem uma **data de validade**. A validade aparece na lista de produtos e pode ser atualizada ao editar o cadastro. Produtos existentes são preservados e precisam da data ao serem editados. Use **Movimentar estoque** para entradas e saídas posteriores.
 4. Em **Cartões QR**, crie um lote. Use a ação de impressão de uma linha para um cartão ou selecione os cartões e clique em **Imprimir seleção**. Use o diálogo de impressão do navegador para escolher a impressora ou salvar em PDF.
 
 A primeira execução cria `data/pdv.sqlite`. Para mover ou copiar o banco, desligue o servidor e faça backup da pasta de dados inteira, incluindo os arquivos auxiliares do SQLite quando estiverem presentes. Mantenha uma instância do servidor usando esse banco.
@@ -29,20 +41,20 @@ A primeira execução cria `data/pdv.sqlite`. Para mover ou copiar o banco, desl
 
 ## Acesso pelo celular
 
-Com o PDV já aberto no Mac em `http://localhost:3000`, deixe o servidor rodando e abra um segundo terminal na pasta do projeto.
+Com o PDV já aberto no computador em `http://localhost:3000`, deixe o servidor rodando e abra um segundo terminal na pasta do projeto. O comando funciona no Windows, macOS e Linux e gera os certificados pelo Node.js, sem exigir OpenSSL instalado.
 
 ```sh
-npm run celular -- IP_DO_MAC
+npm run celular -- IP_DO_COMPUTADOR
 ```
 
-Use o IP mostrado nos ajustes de Wi‑Fi do Mac. O comando imprime o endereço HTTPS na porta `3443` e encaminha as leituras para o mesmo servidor usado pelo caixa. Mantenha os dois terminais abertos.
+Use o IP do computador na rede local. O comando imprime o endereço HTTPS na porta `3443` e encaminha as leituras para o mesmo servidor usado pelo caixa. Mantenha os dois processos rodando e conecte o celular à mesma rede.
 
-Transfira `data/https/balcao-ca.cer` do Mac para o celular. Esse é o certificado público da autoridade local do PDV. Os arquivos `.key` ficam no Mac.
+Transfira `data/https/balcao-ca.cer` do computador para o celular. Esse é o certificado público da autoridade local do PDV. Os arquivos `.key` ficam no computador do servidor.
 
 - **iPhone** — Abra o arquivo recebido por AirDrop e instale o perfil em **Ajustes**. Depois ative a confiança em **Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado**. [Suporte da Apple](https://support.apple.com/pt-br/102390)
 - **Android** — Abra **Instalar certificado** nos ajustes de segurança, escolha **Certificado CA** e selecione o arquivo recebido. Os nomes dos menus variam conforme o aparelho.
 
-No celular, abra o endereço HTTPS exibido no terminal e faça login. No Mac, gere um código em **Parear caixa**. No celular, abra **Leitor de QR → Parear com caixa** e informe o código.
+No celular, abra o endereço HTTPS exibido no terminal e faça login. Para atender diretamente no celular, selecione **Neste dispositivo** e leia o cartão. Para enviar leituras ao caixa, gere um código em **Parear caixa** no computador e informe-o em **Leitor de QR → Parear com caixa** no celular.
 
 ### Servidor HTTPS direto
 
@@ -65,7 +77,10 @@ Se a loja já tiver um proxy HTTPS, mantenha o Node acessível apenas na interfa
 ### Operar no celular ou no caixa
 
 - Para operar pelo celular, selecione **Neste dispositivo** e leia o cartão. Se houver atendimento aberto, ele aparece imediatamente. Para um cartão livre, toque em **Iniciar atendimento**. A câmera continua ativa durante o atendimento até ser desligada ou até você sair das telas de atendimento e leitura.
-- Para parear, abra **Parear caixa** no computador que vai receber as leituras. Informe o nome do caixa e gere um código. No celular, abra **Leitor de QR**, toque em **Parear com caixa** e informe os seis dígitos em até dois minutos. Cada código dá direito a um vínculo. Mantenha o caixa online. A leitura abre o cartão no caixa vinculado. Use sessões distintas no caixa e no celular.
+- No celular, use **Produtos** para pesquisar, filtrar por categoria e tocar nos itens que deseja adicionar. Use **Comanda** ou **Ver comanda**, na barra inferior, para conferir os itens e alterar quantidades. O número do cartão, a quantidade de itens e o total ficam visíveis durante o atendimento. A confirmação de inclusão informa a comanda que recebeu o produto. Operadores com permissão de atendimento podem adicionar produtos mesmo sem permissão para receber pagamentos.
+- **Comandas abertas na loja** mostra o total atual do servidor. **Comanda (N itens)** indica a quantidade de produtos da comanda selecionada, não o número de comandas da loja. As comandas lidas pelo operador ou pelo dispositivo pareado aparecem como cartões para seleção. Ao abrir uma nova aba ou recarregar, o celular recupera as comandas abertas acessíveis no servidor, inclusive as anteriores ao pareamento. Esse compartilhamento depende de um vínculo e de uma sessão válidos; desvincular revoga o acesso herdado, preservando as leituras próprias de QR.
+- A tela se adapta de 320 px até tablets e desktops: celulares usam duas colunas de produtos e alternam entre catálogo e comanda; telas maiores mostram os dois painéis lado a lado. Há espaço para as áreas seguras da tela, botões para toque e campos que mantêm o tamanho legível ao abrir o teclado. Se a conexão cair, as inclusões ficam bloqueadas até a reconexão automática, sem reenviar alterações pendentes. Ao voltar ao navegador ou recarregar a página na mesma sessão, a comanda é consultada novamente no servidor.
+- Para parear, abra **Parear caixa** no computador que vai receber as leituras. Informe o nome do caixa e gere um código. No celular, abra **Leitor de QR**, toque em **Parear com caixa** e informe os seis dígitos em até dois minutos. Cada código dá direito a um vínculo. Mantenha o caixa online. No modo **No caixa e neste celular**, a leitura abre o mesmo cartão nos dois dispositivos. A abertura e as alterações da comanda são sincronizadas, e o celular também pode adicionar produtos conforme as permissões do operador. Use sessões distintas no caixa e no celular.
 - Para usar um leitor externo que emula teclado, foque o campo **Código do cartão** em **Leitor externo**. Configure o leitor para enviar Enter após a leitura.
 - Ao bloquear ou trocar o operador, as comandas abertas continuam no servidor. Leia novamente os cartões para retomá-las. O histórico do próprio turno corresponde aos atendimentos encerrados no turno mais recente do operador. Vendas antigas sem turno usam a sessão registrada. Cancelamentos sem turno comprovado usam o operador registrado. O pareamento encerra ao sair da sessão do caixa ou do leitor. O administrador também pode revogar o vínculo pelo caixa.
 
@@ -96,13 +111,31 @@ O QR contém um identificador aleatório do cartão. Para consultar ou operar um
 - Em **Clientes → Adicionar crédito**, escolha compra de saldo, bonificação ou ajuste. A entrada em dinheiro pertence ao turno em que foi recebida. Em **Compras e fornecedores → Comprar cartas do cliente**, a entrada de estoque e o crédito ficam ligados e são gravados juntos.
 - Em **Cartões QR**, use **Bloquear** para cartões perdidos e **Substituir QR** para gerar outro código no mesmo cartão. Imprima o código novo. O acesso por número exige permissão e motivo.
 
-### Estoque e relatórios
+### Controle de validade por produto
+
+- **Produtos** e **Visão geral** mostram produtos vencidos, que vencem hoje, em 1 a 7 dias, em 8 a 30 dias e alimentos ou bebidas sem validade. Os totais consideram o estoque físico atual, incluindo reservas e produtos inativos, independentemente do período financeiro selecionado. Clique numa faixa para filtrar os produtos. A lista prioriza validades pendentes e datas mais próximas; **Exportar validades** baixa o estoque com validade em CSV.
+- Cada produto tem uma validade. Ela vale até o fim do dia no fuso configurado em `PDV_TIMEZONE`. A partir do dia seguinte o servidor bloqueia inclusões, aumentos de quantidade, novos pagamentos, confirmação de PIX e fechamento. Alimentos e bebidas antigos sem validade também ficam bloqueados. Remoções e estornos continuam disponíveis. O sistema verifica novamente no servidor em cada operação e atualiza as telas abertas a cada minuto e ao voltar à janela.
+- Separe fisicamente os produtos e use **Registrar perda por validade** na linha do produto. Informe a quantidade e o motivo. A baixa atualiza o estoque e seu custo e registra operador, data e motivo nas movimentações e na auditoria. Unidades reservadas precisam ser removidas das comandas antes da baixa. Reenvios da mesma operação não repetem a perda. Operadores sem permissão de estoque precisam de aprovação administrativa.
+- Alterar uma validade com estoque exige motivo e fica na auditoria; reservas abertas impedem essa alteração. Entradas manuais e compras não aceitam produtos vencidos ou sem validade obrigatória. Uma devolução pode recolocar um produto vencido no estoque físico, mas ele permanece bloqueado para venda e deve ser separado para perda. Com uma validade por produto, mantenha cadastros separados quando houver datas diferentes simultaneamente.
+- **Desmembrar** também verifica a validade: origem e destino devem estar próprios para venda e ter a mesma data. Isso impede transformar estoque vencido em unidades vendáveis ou prolongar sua validade durante a conversão.
+
+### Assistente de estoque local
+
+- Abra **Assistente de estoque**, no menu, ou **Ver análise e dicas**, na Visão geral. O monitor usa análise estatística e regras explicáveis executadas no servidor da loja. Funciona sem internet, chave de API ou envio de dados a serviços externos. Não usa um modelo generativo externo.
+- O assistente compara as vendas líquidas dos últimos 30 dias com os 30 anteriores e detecta produtos parados, queda nas vendas, cobertura alta, saldo inativo e riscos de validade. O limite padrão para estoque parado é de 30 dias, ajustável entre 7 e 365 dias. Os dados são atuais e independem do período financeiro selecionado no dashboard; as telas abertas são atualizadas após alterações e a cada minuto.
+- Cada dica mostra os números que a justificam. As sugestões incluem exposição, redução de compras e combos com outro produto da mesma categoria cuja saída recente seja comprovada. Um preço de teste só é sugerido quando há custo cadastrado e margem bruta positiva, com desconto limitado a 10% do preço e à metade da margem unitária. Confira taxas, impostos e despesas antes de aplicar qualquer oferta. O assistente não altera preços nem lança movimentos automaticamente.
+- Comandas abertas, canceladas e estornadas não contam como vendas concluídas. As devoluções descontam as quantidades das vendas originais. Estoque reservado não entra nas unidades livres nem no custo do saldo parado. O tempo sem saída começa na última venda líquida ou no início do saldo positivo atual, o que for mais recente; zerar e repor o estoque reinicia esse ciclo. Sem movimentação de entrada registrada, o assistente informa que não pode confirmar a idade do saldo.
+- A cobertura é uma estimativa baseada no ritmo médio de 30 dias, sem ajuste de sazonalidade. Produtos novos, bases pequenas e custos ausentes são sinalizados. Produtos vencidos ou sem validade obrigatória recebem instruções de separação ou regularização, sem sugestões promocionais. Use a busca, os filtros e **Exportar análise** para revisar os produtos. O acesso exige a permissão **Acessar dashboard e relatórios**.
+
+### Movimentações e relatórios
 
 - Em **Compras e fornecedores**, cadastre o fornecedor e registre o produto, a quantidade e o custo unitário. Em **Produtos**, use **Conferência física** para registrar a contagem e **Desmembrar** para transformar uma embalagem em unidades avulsas. O valor total de estoque transferido é preservado em centavos. Cada variação TCG tem seu próprio código e saldo. Marque a estrela no catálogo do atendimento para adicionar aos favoritos.
 - Em **Produtos → Importar CSV**, escolha se deseja criar, atualizar ou ambos. Confira a prévia e os erros antes de aplicar. O estoque da planilha representa a contagem física final. A importação completa é interrompida se houver um erro ou se o estoque mudar depois da prévia.
 - Use os filtros de **Visão geral** para selecionar o período. **Conferência gerencial** separa recebimentos, caixa, créditos, devoluções e vendas. As seções expansíveis mostram os registros de cada grupo. A sugestão de reposição usa o maior valor entre o estoque mínimo e as unidades vendidas na janela selecionada e desconta o estoque disponível. Os relatórios históricos preservam o total original da venda e informam as devoluções separadamente.
 
 Exemplo de arquivo de importação, com valores em reais.
+
+Para alimentação e bebidas, inclua a coluna `validade` com uma data no formato `AAAA-MM-DD` (por exemplo, `2027-06-30`). Nas atualizações, omitir essa coluna preserva a validade cadastrada; uma data vazia não é aceita nessas categorias.
 
 ```csv
 codigo;nome;categoria;preco;estoque;minimo;custo
@@ -119,6 +152,8 @@ BOOSTER-01;Booster;TCG;19,90;24;4;12,50
 - **Histórico**, **Visão geral** e **Conferência gerencial** filtram por produto, caixa e turno. O filtro de produto seleciona vendas inteiras que contenham o item. Para devoluções, considera os itens devolvidos. As listas financeiras da conferência mostram até 100 registros por página. O CSV contempla todo o período filtrado.
 
 A migração SQLite 3 cria o registro das chaves e das correções de compras, acrescenta os custos exatos às baixas e devoluções, vincula cancelamentos a turnos comprovados e adiciona índices dos relatórios. As consultas e a preparação de CSVs rodam em dois workers com conexões SQLite de leitura. Em instalações que usam banco em memória, os relatórios usam a conexão local.
+
+A migração SQLite 4 acrescenta a validade ao cadastro de produtos e preserva os registros existentes. O servidor cria um backup antes de migrar um banco em arquivo.
 
 ### Backup, migração e restauração
 
@@ -141,8 +176,16 @@ Confira o banco restaurado em `http://localhost:3010`. A restauração exige um 
 npm test
 ```
 
+Para validar o atendimento responsivo em um navegador Chromium instalado (Chrome ou Edge), execute também:
+
+```sh
+npm run test:mobile
+```
+
+Esse teste usa banco em memória, contas fictícias e um perfil separado do navegador. Verifica inclusão e edição de produtos, troca de comandas, busca, sincronização com o caixa, queda e recuperação de conexão e 12 resoluções entre 320 e 1366 px. Salva capturas e o resultado em `test-output/mobile/`. Para outro caminho de navegador, defina `PDV_TEST_BROWSER` com o executável. A emulação não substitui a conferência da câmera e do teclado nos aparelhos reais.
+
 Os testes usam instâncias e bancos separados dos dados reais. A suíte gera e decodifica os QR Codes e verifica pareamento, sincronização por eventos, reservas e permissões. Também cobre pagamentos parciais e mistos, PIX, troco, concorrência de crédito, transferência com pagamentos, devoluções, turnos, relatórios, importação CSV, desmembramento e recuperação a partir do backup.
 
-O teste de carga cria 20 mil vendas e mil produtos em um banco temporário. Dispara consultas de histórico, dashboard, conferência e exportação CSV enquanto manda uma leitura pelo leitor pareado. A medição começa no envio do código já reconhecido e termina após a consulta da comanda no caixa.
+O teste de carga cria 20 mil vendas e mil produtos em um banco temporário. Dispara seis consultas concorrentes de histórico, dashboard, conferência, assistente de estoque e exportações CSV enquanto manda uma leitura pelo leitor pareado. A medição começa no envio do código já reconhecido e termina após a consulta da comanda no caixa.
 
 Para homologar no balcão, teste a aceitação do certificado, enquadramento, leitura de dois cartões em sequência sem reativar a câmera, som, vibração, lanterna, impressão e tempo entre a leitura e a abertura no monitor com o aparelho e a rede que serão usados.

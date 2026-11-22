@@ -104,8 +104,8 @@ export const iconBtn = (label,action,ico,attrs='') =>
   btn('',action,{ico,cls:'icon-btn',attrs:`aria-label="${h(label)}" title="${h(label)}" ${attrs}`});
 export const empty = (ico,title,description='',extra='') =>
   `<div class="empty"><div class="empty-icon">${icon(ico,25)}</div><strong>${h(title)}</strong>${description ? `<p>${h(description)}</p>` : ''}${extra}</div>`;
-export const header = (title,subtitle,actions='') =>
-  `<header class="page-heading"><div><h1>${h(title)}</h1>${subtitle ? `<p>${h(subtitle)}</p>` : ''}</div>${actions ? `<div class="head-actions">${actions}</div>` : ''}</header>`;
+export const header = (title,subtitle,actions='',cls='') =>
+  `<header class="page-heading${cls?' '+h(cls):''}"><div><h1>${h(title)}</h1>${subtitle ? `<p>${h(subtitle)}</p>` : ''}</div>${actions ? `<div class="head-actions">${actions}</div>` : ''}</header>`;
 export const lab = (label,field,cls='') => `<label class="field ${cls}"><span>${h(label)}</span>${field}</label>`;
 export function input(name,value='',attrs='') {
   const type=/(?:^|\s)type="([^"]+)"/.exec(attrs)?.[1] || 'text';

@@ -17,6 +17,7 @@ const state={
   me:null,config:null,view:null,online:false,favorites:[],products:[],customers:[],cards:[],users:[],
   pairing:{reader:null,readers:[]},scanMode:'direct',vibrate:localStorage.getItem('pdv.vibrate')==='true',
   scanned:new Map(),card:null,notes:new Map(),selectedCards:new Set(),donutMode:'count',
+  openCards:{total:null,cards:[]},
   dashboardFilter:{period:'today'},dashboardApplied:{period:'today'},
   historyFilter:{page:1},auditFilter:{page:1},filters:{employees:[],categories:[]},local:{}
 };
@@ -37,6 +38,8 @@ let renderId=0;
 let refreshTimer;
 let refreshActive=false;
 let refreshPending=false;
+let reconnectTimer;
+let reconnectDelay=1000;
 let dialogState={};
 let pairingTimer;
 let authVersion=0;
@@ -69,6 +72,7 @@ async function api(path,{body}={}) {
 }
 const query = (path,values) => path+'?'+new URLSearchParams(Object.entries(values).filter(([,value])=>value!==''&&value!=null));
 function online(value) {
+  const changed=state.online!==value;
   state.online=value;
   const indicator=$('#connectivity');
   if (indicator) {
@@ -81,6 +85,7 @@ function online(value) {
     button.disabled=!value || !state.card?.order?.items.length;
   });
   if (!value && state.me && state.view==='scanner') scanner.status('Sem conexão com o servidor. Aguarde a reconexão.','error');
+  if (changed && state.view==='pos') renderPos();
   updatePayment();
 }
 function toast(message,tone='success') {
@@ -94,21 +99,38 @@ function toast(message,tone='success') {
 function sessionKey() {return 'pdv.cart.'+state.me?.started_at;}
 function saveTabs() {
   if (!state.me) return;
-  sessionStorage.setItem(sessionKey(),JSON.stringify({active:state.card?.id,ids:[...state.scanned.keys()]}));
+  sessionStorage.setItem(sessionKey(),JSON.stringify({active:state.card?.id,ids:[...state.scanned.keys()],hidden:state.local.hiddenCards || []}));
 }
 async function restoreTabs() {
   if (!can('operate')) return;
   let snapshot;
-  try {snapshot=JSON.parse(sessionStorage.getItem(sessionKey()));} catch {return;}
-  if (!snapshot?.ids?.length) return;
+  try {snapshot=JSON.parse(sessionStorage.getItem(sessionKey()));} catch {}
+  state.local.hiddenCards=Array.isArray(snapshot?.hidden)?snapshot.hidden:[];
   const currentUser=authVersion;
-  const entries=await Promise.allSettled(snapshot.ids.map(id=>api('cards/'+id)));
+  const open=await loadOpenCards().catch(()=>({total:null,cards:[]}));
+  if (currentUser!==authVersion || !state.me) return;
+  state.openCards=open;
+  const first=open.cards.find(card=>!state.local.hiddenCards.includes(card.id));
+  const ids=[...new Set([...(snapshot?.ids || []),...(first?[first.id]:[])])];
+  const entries=await Promise.allSettled(ids.map(id=>api('cards/'+id)));
   if (currentUser!==authVersion || !state.me) return;
   for (const entry of entries) {
     if (entry.status==='fulfilled') state.scanned.set(entry.value.id,entry.value);
   }
-  state.card=state.scanned.get(snapshot.active) || null;
+  state.card=state.scanned.get(snapshot?.active) || state.scanned.get(first?.id) || null;
   saveTabs();
+}
+async function loadOpenCards() {
+  try {return await api('open-cards');}
+  catch (error) {
+    if (error.status!==404) throw error;
+    // Compatibilidade enquanto o servidor anterior ainda estiver rodando.
+    if (can('cards')) {
+      const cards=(await api('cards')).filter(card=>card.order_id && !card.blocked && card.active);
+      return {total:cards.length,cards};
+    }
+    return {total:null,cards:[]};
+  }
 }
 function closeModal() {
   if (dialog.open) dialog.close();
@@ -145,17 +167,22 @@ function locked(message='') {
   authVersion++;
   events?.close();
   events=null;
+  clearTimeout(reconnectTimer);
+  reconnectDelay=1000;
   scanner.stop();
   closeModal();
   state.me=null;
   state.view=null;
   state.scanned.clear();
+  state.openCards={total:null,cards:[]};
   state.card=null;
   state.notes.clear();
   state.selectedCards.clear();
   state.products=[];
   state.favorites=[];
   state.stockDays=undefined;
+  state.insightIdleDays=undefined;
+  state.stockInsights=null;
   state.managementPage=1;
   state.customers=[];
   state.cards=[];
@@ -206,20 +233,21 @@ async function enter(user) {
   if (state.me) await navigate(view);
 }
 function startEvents() {
+  clearTimeout(reconnectTimer);
   events?.close();
   const stream=new EventSource('/api/events');
   events=stream;
   stream.addEventListener('ready',()=>{
     if (stream!==events) return;
+    clearTimeout(reconnectTimer);
+    reconnectDelay=1000;
     online(true);
     scheduleRefresh();
   });
   stream.addEventListener('error',()=>{
     if (stream!==events) return;
     online(false);
-    api('session').then(config=>{
-      if (!config.user && stream===events) locked('Sessão encerrada. Entre novamente.');
-    }).catch(()=>{});
+    reconnectEvents(stream);
   });
   stream.addEventListener('locked',()=>{
     if (stream===events) locked('Sessão encerrada.');
@@ -231,6 +259,22 @@ function startEvents() {
     const card=JSON.parse(event.data);
     receiveCard(card.id).catch(error=>toast(error.message,'error'));
   });
+}
+function reconnectEvents(stream) {
+  clearTimeout(reconnectTimer);
+  const version=authVersion;
+  reconnectTimer=setTimeout(async()=>{
+    if (stream!==events || version!==authVersion || !state.me || state.online) return;
+    try {
+      const config=await api('session');
+      if (stream!==events || version!==authVersion || !state.me) return;
+      if (!config.user) return locked('Sessão encerrada. Entre novamente.');
+      startEvents();
+    } catch {
+      if (stream===events && version===authVersion && state.me) reconnectEvents(stream);
+    }
+  },reconnectDelay);
+  reconnectDelay=Math.min(10000,reconnectDelay*2);
 }
 function scheduleRefresh() {
   refreshPending=true;
@@ -252,12 +296,13 @@ function scheduleRefresh() {
 async function load(view) {
   switch (view) {
     case 'dashboard': {
-      const [report,filters]=await Promise.all([api(query('dashboard',state.dashboardApplied)),api('filters')]);
-      return {report,filters};
+      const [report,filters,products,stockInsights]=await Promise.all([api(query('dashboard',state.dashboardApplied)),api('filters'),can(['products','stock'])?api('products'):Promise.resolve([]),api(query('stock-insights',{idleDays:state.insightIdleDays}))]);
+      return {report,filters,products,stockInsights};
     }
+    case 'insights': return {stockInsights:await api(query('stock-insights',{idleDays:state.insightIdleDays}))};
     case 'pos': {
-      const [products,favorites]=await Promise.all([api('products'),api('favorites')]);
-      return {products,favorites};
+      const [products,favorites,openCards]=await Promise.all([api('products'),api('favorites'),loadOpenCards()]);
+      return {products,favorites,openCards};
     }
     case 'cash': return {cash:await api('cash')};
     case 'backups': return {backups:await api('backups')};
@@ -294,6 +339,7 @@ async function load(view) {
 const pages={dashboard:views.dashboard,pos:views.pos,scanner:views.scannerView,products:views.productsView,
   customers:views.customersView,cards:views.cardsView,history:views.historyView,users:views.usersView,audit:views.auditView,
   cash:updates.cashPage,supplies:updates.suppliesPage,management:updates.managementPage,backups:updates.backupsPage,
+  insights:views.stockInsightsView,
   account:()=>header('Sua sessão','Nenhuma tela está disponível para as permissões deste operador.')};
 function focusBefore() {
   const active=document.activeElement;
@@ -405,16 +451,27 @@ function renderPos() {
   const focus=focusBefore();
   if (order) {
     order.innerHTML=views.orderPanel(state);
-    $('#order-tabs').innerHTML=views.orderTabs(state);
+    $('#open-orders-region').innerHTML=views.openOrderNavigation(state);
     $('#mobile-checkout').innerHTML=views.mobileCheckout(state);
     $('#product-grid').innerHTML=views.productGrid(state);
+    syncPosNavigation();
     focusAfter(focus);
   }
   updatePayment();
 }
+function syncPosNavigation() {
+  const workspace=$('#pos-workspace');
+  if (!workspace) return;
+  workspace.dataset.mobilePanel=views.posMobilePanel(state);
+  $('#mobile-pos-navigation').innerHTML=views.mobilePosNavigation(state);
+  const feedback=$('#pos-add-feedback');
+  feedback.textContent=state.local.posFeedback || 'Toque em um produto para adicionar à comanda.';
+  feedback.title=feedback.textContent;
+}
 function setCard(card,activate=true) {
   const known=state.scanned.get(card.id);
   if (known?.order && card.order && known.order.id===card.order.id && known.order.version>card.order.version) card=known;
+  if (state.card?.id===card.id && !state.card.order && card.order) state.local.posMobilePanel='catalog';
   state.scanned.set(card.id,card);
   if (activate || state.card?.id===card.id) state.card=card;
   saveTabs();
@@ -430,10 +487,13 @@ async function receiveCard(id,data=null) {
   const version=authVersion;
   const card=data || await api('cards/'+id);
   if (version!==authVersion || !state.me) return;
+  state.local.posMobilePanel=card.order?'catalog':'order';
+  state.local.posFeedback='';
+  state.local.hiddenCards=(state.local.hiddenCards || []).filter(id=>id!==card.id);
   setCard(card);
   if (state.view==='pos' && $('#order-panel')) renderPos();
   else await navigate('pos',{preserveModal:dialog.open});
-  toast(`Cartão #${cardNumber(card.number)} ${card.order?'aberto':'disponível'}.`);
+  if (card.order) toast(`Comanda #${cardNumber(card.number)} selecionada.`);
 }
 async function scanCode(code,{external=false}={}) {
   if (!state.online) {
@@ -449,7 +509,9 @@ async function scanCode(code,{external=false}={}) {
     if (version!==authVersion) return;
     scanner.feedback(true,state.vibrate);
     if (value.sent) {
-      scanner.status(`Cartão #${cardNumber(value.number)} enviado para ${value.terminal}.`,'success');
+      if (value.card) await receiveCard(value.card.id,value.card);
+      scanner.status(value.card?`Cartão #${cardNumber(value.number)} disponível neste celular e enviado para ${value.terminal}.`:
+        `Cartão #${cardNumber(value.number)} enviado para ${value.terminal}.`,'success');
     } else {
       await receiveCard(value.id,value);
     }
@@ -547,6 +609,7 @@ function updatePayment() {
   $('#payments-pending',form).textContent=order.pending ? `${money(order.pending)} em PIX pendente` : '';
   $('#cash-change',form).textContent=money(Math.max(0,received-parsed.cash));
   const error=dialogState.finalized?'':!current?'Esta comanda foi encerrada ou perdeu acesso. Confira o histórico.':
+    current.sale_blocks?.length?'Venda bloqueada por validade. Cancele as parcelas e remova os itens vencidos ou regularize as validades ausentes.':
     current.version!==order.version?'A comanda mudou. Reabra o pagamento para conferir o estado salvo.':
     !valid?'Confira os valores informados.':parsed.store>(current?.balance ?? order.balance)?'Saldo de crédito insuficiente.':
     parsed.cash && received<parsed.cash?'Informe o valor recebido em dinheiro.':
@@ -582,7 +645,7 @@ async function printCards(ids) {
   if (ids.length>100) throw new Error('Selecione no máximo 100 cartões por impressão.');
   const cards=await api('cards/print?ids='+ids.join(','));
   if (!cards.length) throw Error('Selecione ao menos um cartão disponível para impressão.');
-  const images=cards.map(row=>`<article class="printed-card"><h2>Comanda #${cardNumber(row.number)}</h2><img src="/api/cards/${row.id}/qr" alt="QR da comanda ${row.number}" width="240" height="240"><b>Balcão PDV</b></article>`);
+  const images=cards.map(row=>`<article class="printed-card"><h2>Comanda #${cardNumber(row.number)}</h2><img src="/api/cards/${row.id}/qr" alt="QR da comanda ${row.number}" width="240" height="240"><b>Last Place PDV</b></article>`);
   printArea.innerHTML=`<div class="printed-grid">${images.join('')}</div>`;
   try {
     await Promise.all([...printArea.querySelectorAll('img')].map(img=>img.decode()));
@@ -643,22 +706,33 @@ async function actions(action,element) {
       $('#product-grid').innerHTML=views.productGrid(state);
       return;
     case 'switch-card': return receiveCard(id);
+    case 'pos-panel':
+      state.local.posMobilePanel=element.dataset.panel==='order'?'order':'catalog';
+      syncPosNavigation();
+      $('#mobile-checkout').innerHTML=views.mobileCheckout(state);
+      $('#pos-workspace')?.scrollIntoView({block:'start'});
+      $(views.posMobilePanel(state)==='catalog'?'#catalog-heading':'#order-panel')?.focus({preventScroll:true});
+      return;
     case 'hide-card':
+      state.local.hiddenCards=[...new Set([...(state.local.hiddenCards || []),id])];
       state.scanned.delete(id);
       if (state.card?.id===id) state.card=null;
       saveTabs();
       renderPos();
       return;
     case 'open-order':
+      state.local.posMobilePanel='catalog';
       return applyCard(await send(`cards/${id}/open`));
     case 'add-item':
     case 'item-plus':
     case 'item-minus': {
       if (!data) return;
+      if (!state.online) throw new Error('Sem conexão. Aguarde o servidor para adicionar ou alterar produtos.');
       const version=authVersion;
       const patch=action==='add-item'?{product:id}:{item:id};
       const next=mutationQueue.catch(()=>{}).then(async()=>{
         if (version!==authVersion) return;
+        if (!state.online) throw new Error('Sem conexão. Aguarde o servidor para adicionar ou alterar produtos.');
         const current=state.scanned.get(data.card_id)?.order;
         if (action==='item-minus') {
           const item=find(current?.items || [],id);
@@ -669,7 +743,10 @@ async function actions(action,element) {
           }
           patch.expectedQuantity=item.quantity;
         }
-        applyCard(await send(`orders/${data.id}/items`,{...patch,action:'delta',delta:action==='item-minus'?-1:1}));
+        const result=await send(`orders/${data.id}/items`,{...patch,action:'delta',delta:action==='item-minus'?-1:1});
+        if (version!==authVersion) return;
+        if (action==='add-item') state.local.posFeedback=`${find(state.products,id)?.name || 'Produto'} adicionado à comanda #${cardNumber(data.number)}.`;
+        applyCard(result);
       });
       mutationQueue=next;
       return next;
@@ -732,6 +809,24 @@ async function actions(action,element) {
       printArea.innerHTML=modals.receipt(receiptOrder,state.config);
       window.print();
       return;
+    case 'insights-export': location.href='/api/'+query('stock-insights.csv',{idleDays:state.insightIdleDays}); return;
+    case 'insights-product':
+      state.local.productSearch=element.dataset.code;
+      state.local.productStatus='';
+      state.local.expiryFilter='';
+      return navigate('products');
+    case 'insights-page':
+      state.local.insightPage=Number(element.dataset.page);
+      $('#insight-results').innerHTML=views.stockInsightRows(state);
+      return;
+    case 'expiry-filter':
+      state.local.expiryFilter=element.dataset.status;
+      state.local.productStatus='';
+      state.local.productSearch='';
+      if (state.view==='products') return renderPage();
+      return navigate('products');
+    case 'expiry-export': location.href='/api/inventory/expiry.csv'; return;
+    case 'expiry-loss': return showModal('Registrar perda por validade',modals.expiryLossForm(find(state.products,id)));
     case 'product-edit': return showModal(id?'Editar produto':'Novo produto',modals.productForm(find(state.products,id),state));
     case 'stock': return showModal('Movimentar estoque',modals.stockForm(find(state.products,id)));
     case 'stock-history': {
@@ -846,6 +941,10 @@ async function submit(form,name,fields,context) {
       state.dashboardApplied={...fields};
       state.managementPage=1;
       return pageReload();
+    case 'insights-filter':
+      state.insightIdleDays=Number(fields.idleDays);
+      state.local.insightPage=1;
+      return pageReload();
     case 'history-filter':
       state.historyFilter={...fields,page:1};
       return pageReload();
@@ -887,6 +986,11 @@ async function submit(form,name,fields,context) {
       closeModal();
       await pageReload();
       return toast('Movimentação registrada.');
+    case 'expiry-loss':
+      await protect(`products/${id}/expiry-loss`,{quantity:Number(fields.quantity),expected_stock:Number(fields.expected_stock),expected_expiry:fields.expected_expiry || null,reason:fields.reason,approval:modals.approvalFrom(fields)});
+      closeModal();
+      await pageReload();
+      return toast('Perda registrada no estoque e na auditoria.');
     case 'customer': {
       const customer=await send(id?`customers/${id}`:'customers',{...fields,active:fields.active!=='no'});
       if (context.order) {
@@ -1016,6 +1120,7 @@ document.addEventListener('input',event=>{
   const field=event.target;
   if (event.isComposing) return;
   uppercaseField(field);
+  if (field.name==='category' && field.form?.dataset.form==='product') modals.updateProductExpiry(field.form);
   if (field.hasAttribute('data-money') && event.inputType==='insertFromPaste') {
     formatMoneyField(field);
     editMoneyField(field);
@@ -1023,6 +1128,10 @@ document.addEventListener('input',event=>{
   if (field.id==='pos-search') {
     state.local.posSearch=field.value;
     $('#product-grid').innerHTML=views.productGrid(state);
+  } else if (field.id==='insight-search') {
+    state.local.insightSearch=field.value;
+    state.local.insightPage=1;
+    $('#insight-results').innerHTML=views.stockInsightRows(state);
   } else if (field.id==='product-search') {
     state.local.productSearch=field.value;
     $('#list-results').innerHTML=views.productRows(state);
@@ -1045,6 +1154,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const field=event.target;
   uppercaseField(field);
+  if (field.name==='category' && field.form?.dataset.form==='product') modals.updateProductExpiry(field.form);
   if (field.name==='period' && ['dashboard','management'].includes(state.view)) {
     captureFilterDraft();
     if (!state.dashboardFilter.start) state.dashboardFilter.start=dayKey();
@@ -1053,6 +1163,13 @@ document.addEventListener('change',event=>{
   } else if (field.id==='product-status') {
     state.local.productStatus=field.value;
     $('#list-results').innerHTML=views.productRows(state);
+  } else if (field.id==='insight-signal') {
+    state.local.insightSignal=field.value;
+    state.local.insightPage=1;
+    $('#insight-results').innerHTML=views.stockInsightRows(state);
+  } else if (field.id==='product-expiry') {
+    state.local.expiryFilter=field.value;
+    renderPage();
   } else if (field.id==='deposit-source') {
     const origin=$('#deposit-origin');
     origin.disabled=field.value!=='funded';
@@ -1089,7 +1206,16 @@ document.addEventListener('change',event=>{
 window.addEventListener('storage',event=>{
   if (event.key===themeKey) applyTheme(savedTheme());
 });
-window.addEventListener('online',scheduleRefresh);
+window.addEventListener('online',()=>{
+  if (state.me && !state.online) startEvents();
+  scheduleRefresh();
+});
 window.addEventListener('offline',()=>api('session').then(()=>online(true)).catch(()=>online(false)));
 window.addEventListener('afterprint',()=>printArea.replaceChildren());
+setInterval(()=>{
+  if (state.me && !document.hidden && ['dashboard','products','pos','insights'].includes(state.view)) scheduleRefresh();
+},60000);
+document.addEventListener('visibilitychange',()=>{
+  if (!document.hidden && state.me) scheduleRefresh();
+});
 bootstrap();

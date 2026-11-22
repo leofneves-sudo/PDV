@@ -1,7 +1,7 @@
 const {Worker}=require('node:worker_threads');
 const {join,resolve}=require('node:path');
 const {Problem}=require('./db');
-const paths=new Set(['history','filters','dashboard','management','dashboard.csv','history.csv','management.csv']);
+const paths=new Set(['history','filters','dashboard','management','dashboard.csv','history.csv','management.csv','stock-insights','stock-insights.csv']);
 
 function createPool(file) {
   const workers=new Set(), queue=[];

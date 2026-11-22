@@ -52,6 +52,7 @@ function pay(actor,id,body,close=false) {
   return request(actor,id,body,close?'checkout':'payment',()=>{
     const order=ops.openForEdit(actor,id);
     validateVersion(order,body.version);
+    ops.assertOrderSaleable(id);
     const shift=currentShift(actor);
     const {subtotal,units}=ops.totals(id);
     const total=subtotal-order.discount;
@@ -98,6 +99,7 @@ function confirmPix(actor,id,body) {
     const payment=originalPayment(body.payment,id);
     if (payment.state==='confirmed' && payment.method==='pix') return ops.cardDetail(actor,order.card_id);
     if (payment.method!=='pix' || payment.state!=='pending') fail('Somente PIX pendente pode ser confirmado.',409);
+    ops.assertOrderSaleable(id);
     const shift=currentShift(actor);
     const reason=required(body.reason,'Referência ou motivo da confirmação',400,3);
     run("UPDATE payments SET state='confirmed',shift_id=?,confirmed_at=?,confirmed_by=?,confirmed_name=? WHERE id=?",shift.id,now(),actor.id,actor.name,payment.id);

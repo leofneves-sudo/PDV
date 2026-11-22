@@ -33,9 +33,10 @@ const assets = {
   '/':'index.html','/index.html':'index.html','/app.css':'app.css','/app.js':'app.js',
   '/views.js':'views.js','/updates.js':'updates.js','/modals.js':'modals.js','/scanner.js':'scanner.js','/ui.js':'ui.js','/brand.svg':'brand.svg',
   '/qr-scanner.min.js':'node_modules/qr-scanner/qr-scanner.min.js',
-  '/qr-scanner-worker.min.js':'node_modules/qr-scanner/qr-scanner-worker.min.js'
+  '/qr-scanner-worker.min.js':'node_modules/qr-scanner/qr-scanner-worker.min.js',
+  '/expiry.mjs':'expiry.mjs'
 };
-const contentTypes = {html:'text/html',css:'text/css',js:'text/javascript',svg:'image/svg+xml'};
+const contentTypes = {html:'text/html',css:'text/css',js:'text/javascript',mjs:'text/javascript',svg:'image/svg+xml'};
 const okay = (data,changed=false) => ({data,changed});
 function commitIntent(actor,path,body,action) {
   const outcome=intents.perform(actor,path,body,action);
@@ -200,8 +201,9 @@ function scan(actor,body) {
     const streams = target && clients.get(target.session_id);
     if (!streams?.size || !can(target,'operate')) fail('Caixa pareado indisponível. Verifique a conexão ou escolha operar no celular.',409);
     ops.grantCard(target.session_id,card.id);
+    ops.grantCard(actor.session_id,card.id);
     for (const socket of streams) event(socket,'card',{id:card.id,number:card.number});
-    return {sent:true,number:card.number,terminal:pairing.name};
+    return {sent:true,number:card.number,terminal:pairing.name,card:ops.cardDetail(actor,card.id)};
   }
   if (body.mode !== 'direct') fail('Modo de leitura inválido.');
   ops.grantCard(actor.session_id,card.id);
@@ -228,6 +230,7 @@ function auditLog(actor,query) {
 function route(actor,method,path,body,query,ip) {
   if (method === 'GET') {
     if (path === 'products') return okay(ops.products(actor));
+    if (path === 'open-cards') return okay(ops.openCards(actor));
     if (path === 'cash') return okay(cash.cashOverview(actor));
     if (path === 'suppliers') return okay(inventory.suppliers(actor));
     if (path === 'merchandise') return okay(inventory.history(actor));
@@ -289,7 +292,7 @@ function route(actor,method,path,body,query,ip) {
       }
     }
   }
-  const match = /^([a-z]+)\/(\d+)(?:\/([a-z]+))?$/.exec(path);
+  const match = /^([a-z]+)\/(\d+)(?:\/([a-z-]+))?$/.exec(path);
   if (match) {
     const [,collection,raw,action] = match;
     const id = integer(Number(raw),'Identificador',1,Number.MAX_SAFE_INTEGER);
@@ -316,6 +319,7 @@ function route(actor,method,path,body,query,ip) {
     if (method==='POST') {
       if (collection==='products' && !action) return okay(ops.saveProduct(actor,body,id),true);
       if (collection==='products' && action==='stock') return commitIntent(actor,path,body,()=>ops.adjustStock(actor,id,body));
+      if (collection==='products' && action==='expiry-loss') return commitIntent(actor,path,body,()=>inventory.expiryLoss(actor,id,body));
       if (collection==='products' && action==='favorite') return okay(inventory.favorite(actor,id,body),true);
       if (collection==='shifts' && action==='close') return commitIntent(actor,path,body,()=>cash.closeShift(actor,id,body));
       if (collection==='shifts' && action==='move') return commitIntent(actor,path,body,()=>cash.cashMove(actor,id,body));
@@ -439,6 +443,11 @@ async function handle(req,res) {
     const png = await QRCode.toBuffer(`pdv:${card.token}`,{width:420,margin:4,errorCorrectionLevel:'M'});
     res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'private, no-store'});
     return res.end(png);
+  }
+  if (method==='GET' && path==='inventory/expiry.csv') {
+    const csv=inventory.expiryCsv(actor);
+    res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="validade-estoque.csv"','Cache-Control':'no-store'});
+    return res.end('\uFEFF'+csv);
   }
   if (method==='GET' && reportPaths.has(path)) {
     const value=await reportPool.query(path,actor,searchParams);
