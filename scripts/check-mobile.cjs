@@ -13,6 +13,8 @@ const output=resolve(process.env.PDV_TEST_OUTPUT || join(root,'test-output','mob
 const code1='11111111-1111-4111-8111-111111111111';
 const code2='22222222-2222-4222-8222-222222222222';
 const code3='33333333-3333-4333-8333-333333333333';
+const code4='44444444-4444-4444-8444-444444444444';
+const code5='55555555-5555-4555-8555-555555555555';
 const candidates=[process.env.PDV_TEST_BROWSER,
   process.env.ProgramFiles && join(process.env.ProgramFiles,'Google','Chrome','Application','chrome.exe'),
   process.env['ProgramFiles(x86)'] && join(process.env['ProgramFiles(x86)'],'Microsoft','Edge','Application','msedge.exe'),
@@ -27,6 +29,8 @@ async function startServer() {
     run('INSERT INTO cards(number,token) VALUES(41,?)','${code1}');
     run('INSERT INTO cards(number,token) VALUES(42,?)','${code2}');
     run('INSERT INTO cards(number,token) VALUES(43,?)','${code3}');
+    run('INSERT INTO cards(number,token) VALUES(44,?)','${code4}');
+    run('INSERT INTO cards(number,token) VALUES(45,?)','${code5}');
     require('./server');`;
   const child=spawn(process.execPath,['-e',seed],{cwd:root,windowsHide:true,
     env:{...process.env,PDV_DB:':memory:',PDV_HOST:'127.0.0.1',PDV_PORT:'0',PDV_ORIGIN:'',PDV_TLS_CERT:'',PDV_TLS_KEY:'',PDV_BACKUP_MINUTES:'0'},
@@ -86,8 +90,9 @@ async function checkSidebar(page) {
   assert.deepEqual(colors,Array(3).fill('rgb(255, 205, 146)'),'Os três títulos do menu devem usar o âmbar de Administração.');
 }
 
-async function scan(page,code,mode='direct') {
+async function scan(page,code,mode=null) {
   await page.getByRole('button',{name:'Ler QR Code',exact:true}).click();
+  mode=mode || (await page.locator('input[name="scan-mode"][value="direct"]').count()?'direct':'paired');
   await page.locator(`input[name="scan-mode"][value="${mode}"]`).check();
   await page.getByLabel('Código do cartão',{exact:true}).fill('pdv:'+code);
   await page.getByRole('button',{name:'Ler código',exact:true}).click();
@@ -110,7 +115,11 @@ async function scan(page,code,mode='direct') {
     const expired=new Date(storeDay()+'T00:00:00Z');expired.setUTCDate(expired.getUTCDate()-1);
     const blocked=await api(desktop,server.url,'products',{code:'VENC',name:'Produto vencido de teste',category:'Alimentação',expires_on:expired.toISOString().slice(0,10),stock:5,price:500,cost:200,minimum:0});
 
-    const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1,locale:'pt-BR'});
+    const till=await desktop.newPage();
+    till.on('pageerror',error=>pageErrors.push(error.message));
+    await till.goto(server.url);
+    await till.getByRole('button',{name:'Atendimento',exact:true}).click();
+    const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:1,locale:'pt-BR',extraHTTPHeaders:{'X-Forwarded-For':'192.168.50.200'}});
     const phone=await mobile.newPage();
     phone.on('pageerror',error=>pageErrors.push(error.message));
     phone.setDefaultTimeout(12000);
@@ -118,7 +127,28 @@ async function scan(page,code,mode='direct') {
     await phone.getByLabel('Usuário',{exact:true}).fill('atendente');
     await phone.getByLabel('Senha',{exact:true}).fill('teste-mobile-operador');
     await phone.getByRole('button',{name:'Entrar',exact:true}).click();
+    await phone.locator('#pairing-required').waitFor();
+    assert.equal(await phone.locator('#pos-workspace,.navigation').count(),0);
+    assert.equal((await mobile.request.get(server.url+'/api/products')).status(),428);
+    await phone.getByLabel('Código do caixa',{exact:true}).fill('000000');
+    await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
+    await phone.locator('.form-error:visible').waitFor();
+    await phone.reload();
+    await phone.locator('#pairing-required').waitFor();
+    for (const width of [320,390]) {
+      await phone.setViewportSize({width,height:844});
+      await checkLayout(phone,'vínculo obrigatório em '+width+' px');
+      assert.ok(await phone.getByRole('button',{name:'Vincular celular',exact:true}).evaluate(node=>node.getBoundingClientRect().height>=44));
+    }
+    await phone.screenshot({path:join(output,'celular-vinculo-obrigatorio.png')});
+    checks.push('Celular sem vínculo fica bloqueado, inclusive pela API e após recarregar; código inválido não libera o acesso e a tela cabe em 320 px.');
+    const initialPair=await api(desktop,server.url,'pairing/code',{name:'Caixa inicial'});
+    await phone.getByLabel('Código do caixa',{exact:true}).fill(initialPair.code);
+    await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
     await phone.locator('#pos-workspace').waitFor();
+    await phone.reload();
+    await phone.locator('#pos-workspace').waitFor();
+    checks.push('Código gerado no computador libera o atendimento e o vínculo válido permanece ao recarregar o celular.');
     await scan(phone,code1);
     assert.equal(await phone.getByRole('button',{name:'Iniciar atendimento',exact:true}).isVisible(),true);
     await phone.getByRole('button',{name:'Iniciar atendimento',exact:true}).click();
@@ -139,10 +169,6 @@ async function scan(page,code,mode='direct') {
     await addOne();
     checks.push('Operador sem permissão de pagamento inclui produtos e vê o total da comanda.');
 
-    const till=await desktop.newPage();
-    till.on('pageerror',error=>pageErrors.push(error.message));
-    await till.goto(server.url);
-    await till.getByRole('button',{name:'Atendimento',exact:true}).click();
     await scan(till,code1);
     await till.getByRole('button',{name:'Alterar quantidade de Suco de uva 300 ml',exact:true}).waitFor();
     const sizes=[[320,568],[360,640],[375,667],[390,844],[414,896],[430,932],[568,320],[844,390],[932,430],[768,1024],[1024,768],[1366,900]];
@@ -249,7 +275,9 @@ async function scan(page,code,mode='direct') {
     await till.getByRole('button',{name:'Voltar',exact:true}).click();
     await till.getByRole('button',{name:'Voltar ao atendimento',exact:true}).click();
     await phone.getByRole('button',{name:'Ler QR Code',exact:true}).click();
-    await phone.getByRole('button',{name:'Inserir código',exact:true}).click();
+    assert.equal(await phone.locator('input[name="scan-mode"][value="direct"]').count(),0);
+    assert.equal(await phone.getByRole('button',{name:'Gerar código no caixa',exact:true}).count(),0);
+    await phone.getByRole('button',{name:'Trocar caixa',exact:true}).click();
     await phone.getByLabel('Código do caixa',{exact:true}).fill(code);
     await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
     await waitFor(()=>phone.locator('input[name="scan-mode"][value="paired"]').isChecked(),'pareamento pelo leitor de QR');
@@ -266,7 +294,7 @@ async function scan(page,code,mode='direct') {
     await phone.locator('#pos-workspace').waitFor();
     assert.match(await phone.locator('.mobile-pos-context').textContent(),/#043/);
     checks.push('Leitura pareada e abertura no caixa aparecem também no celular, permitem adicionar itens e sobrevivem ao recarregamento.');
-    const recoveredContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,locale:'pt-BR'});
+    const recoveredContext=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,locale:'pt-BR',extraHTTPHeaders:{'X-Forwarded-For':'192.168.50.201'}});
     await api(recoveredContext,server.url,'login',{username:'atendente',password:'teste-mobile-operador'});
     const recoveryPair=await api(desktop,server.url,'pairing/code',{name:'Caixa para recuperação'});
     await api(recoveredContext,server.url,'pairing/link',{code:recoveryPair.code});
@@ -282,12 +310,63 @@ async function scan(page,code,mode='direct') {
     assert.match(await recovered.locator('#mobile-pos-navigation [data-panel="order"]').textContent(),/itens/);
     await checkLayout(recovered,'comandas recuperadas em nova sessão');
     checks.push('Nova sessão do celular pareado recupera as três comandas do caixa e mostra o mesmo total, separado do número de itens.');
-    await recovered.locator('[data-action="hide-card"][data-id="3"]').tap();
+    await recovered.evaluate(()=>{
+      const key=Object.keys(sessionStorage).find(key=>key.startsWith('pdv.cart.'));
+      const saved=JSON.parse(sessionStorage.getItem(key));
+      saved.hidden=[3];
+      sessionStorage.setItem(key,JSON.stringify(saved));
+    });
     await recovered.reload();
     await recovered.locator('#pos-workspace').waitFor();
-    assert.equal(await recovered.locator('[data-action="switch-card"][data-id="3"]').count(),0);
+    assert.equal(await recovered.locator('[data-action="switch-card"][data-id="3"]').count(),1);
     assert.equal(await recovered.locator('[data-open-order-count]').textContent(),'3');
-    checks.push('Ocultar um cartão continua sendo uma preferência local e não muda o total de comandas da loja.');
+    checks.push('Comandas abertas voltam a aparecer mesmo quando o navegador guardou a preferência antiga de ocultá-las.');
+
+    await api(desktop,server.url,'scan',{code:'pdv:'+code4,mode:'direct'});
+    const emptyOrder=(await api(desktop,server.url,'cards/4/open',{})).order;
+    await phone.locator('[data-action="close-card"][data-id="4"]').waitFor();
+    await phone.locator('[data-action="close-card"][data-id="4"]').tap();
+    await phone.locator('#modal').getByRole('button',{name:'Confirmar encerramento',exact:true}).click();
+    await phone.locator('#modal .form-error:visible').waitFor();
+    assert.match(await phone.locator('#modal .form-error').textContent(),/aprovação/);
+    assert.equal((await api(desktop,server.url,'open-cards')).total,4);
+    await phone.locator('#modal').getByRole('button',{name:'Voltar',exact:true}).click();
+    checks.push('O X mantém a exigência de aprovação para um operador sem permissão de cancelar.');
+    assert.match(await till.locator('#order-panel .order-identity').textContent(),/#043/);
+    await till.locator('[data-action="close-card"][data-id="4"]').click();
+    await till.locator('#modal').getByRole('button',{name:'Voltar',exact:true}).click();
+    assert.equal((await api(desktop,server.url,'open-cards')).total,4);
+    await till.locator('[data-action="close-card"][data-id="4"]').click();
+    await till.locator('#modal').getByRole('button',{name:'Confirmar encerramento',exact:true}).click();
+    await waitFor(async()=>(await till.locator('[data-open-order-count]').textContent())==='3','encerramento da comanda vazia');
+    await waitFor(async()=>(await phone.locator('[data-open-order-count]').textContent())==='3','encerramento sincronizado no celular');
+    assert.equal((await api(desktop,server.url,'orders/'+emptyOrder.id)).status,'cancelled');
+    assert.equal(await till.locator('[data-action="switch-card"][data-id="4"]').count(),0);
+    await till.reload();
+    await till.getByRole('button',{name:'Atendimento',exact:true}).click();
+    await till.locator('#pos-workspace').waitFor();
+    assert.equal(await till.locator('[data-open-order-count]').textContent(),'3');
+    assert.equal(await till.locator('[data-action="switch-card"][data-id="4"]').count(),0);
+    checks.push('O X encerra a comanda escolhida, inclusive fora da seleção atual, atualiza o contador nos dois dispositivos e permanece encerrada após recarregar.');
+
+    await api(desktop,server.url,'scan',{code:'pdv:'+code5,mode:'direct'});
+    const disposable=(await api(desktop,server.url,'cards/5/open',{})).order;
+    const stockBefore=(await api(desktop,server.url,'products')).find(row=>row.id===product.id).stock;
+    await api(desktop,server.url,`orders/${disposable.id}/items`,{product:product.id,action:'delta',delta:1});
+    await till.locator('[data-action="close-card"][data-id="5"]').click();
+    await till.locator('#modal [data-action="close-card-cancel"]').click();
+    await till.locator('#modal').getByLabel('Motivo',{exact:true}).fill('Encerramento pelo X no teste');
+    await till.locator('#modal').getByRole('button',{name:'Confirmar cancelamento',exact:true}).click();
+    await waitFor(async()=>(await till.locator('[data-open-order-count]').textContent())==='3','cancelamento pelo X');
+    assert.equal((await api(desktop,server.url,'orders/'+disposable.id)).status,'cancelled');
+    assert.equal((await api(desktop,server.url,'products')).find(row=>row.id===product.id).stock,stockBefore);
+    checks.push('Cancelar pelo X encerra no servidor e libera as reservas sem registrar venda ou baixar estoque.');
+    await scan(till,code5);
+    await till.locator('[data-action="hide-card"][data-id="5"]').click();
+    await waitFor(async()=>(await till.locator('[data-action="switch-card"][data-id="5"]').count())===0,'retirada de cartão disponível');
+    assert.equal((await api(desktop,server.url,'open-cards')).total,3);
+    await till.locator('[data-action="switch-card"][data-id="3"]').click();
+    checks.push('O X de um cartão disponível apenas retira esse cartão da tela, sem alterar os atendimentos.');
 
     await till.setViewportSize({width:1366,height:768});
     await api(desktop,server.url,'cash/open',{register:1,opening:0,request_id:randomUUID()});
@@ -323,6 +402,43 @@ async function scan(page,code,mode='direct') {
     assert.ok(await desktopPayment.evaluate(button=>button.getBoundingClientRect().bottom<=innerHeight));
     await till.screenshot({path:join(output,'caixa-atendimento-escuro.png')});
     checks.push('Comanda ativa identificada nos dois temas e saldo, total, PIX e pagamento acessíveis com uma lista longa.');
+    await till.locator('[data-action="close-card"][data-id="3"]').click();
+    assert.equal(await till.locator('#modal [data-action="close-card-cancel"]').count(),0);
+    await till.locator('#modal [data-action="close-card-payment"]').click();
+    assert.equal(await till.locator('#confirm-checkout').isDisabled(),true);
+    assert.match(await till.locator('#modal').textContent(),/Aguardando confirmação/);
+    await till.locator('#modal').getByRole('button',{name:'Voltar',exact:true}).click();
+    assert.equal((await api(desktop,server.url,'open-cards')).total,3);
+    checks.push('O X de uma comanda com parcelas preserva os valores e impede fechar enquanto existir PIX pendente.');
+    const currentOrder=(await api(desktop,server.url,'cards/3')).order;
+    const pending=currentOrder.payments.find(payment=>payment.state==='pending');
+    await api(desktop,server.url,`orders/${currentOrder.id}/pix`,{request_id:randomUUID(),payment:pending.id,reason:'PIX confirmado no teste isolado'});
+    await till.locator('[data-action="close-card"][data-id="3"]').click();
+    await till.locator('#modal [data-action="close-card-payment"]').click();
+    await till.locator('#modal [data-action="fill-payment"][data-method="debit"]').click();
+    await till.locator('#modal').getByRole('button',{name:'Fechar comanda',exact:true}).click();
+    await waitFor(async()=>(await till.locator('[data-open-order-count]').textContent())==='2','fechamento com pagamento pelo X');
+    await waitFor(async()=>(await phone.locator('[data-open-order-count]').textContent())==='2','fechamento pago sincronizado no celular');
+    assert.equal((await api(desktop,server.url,'orders/'+currentOrder.id)).status,'closed');
+    assert.equal(await till.locator('[data-action="switch-card"][data-id="3"]').count(),0);
+    checks.push('O fluxo do X permite receber o saldo e concluir a venda, retirando a comanda dos atendimentos ativos no PC e no celular.');
+    await phone.getByRole('button',{name:'Ler QR Code',exact:true}).click();
+    await phone.getByRole('button',{name:'Desvincular',exact:true}).click();
+    await phone.locator('#modal').getByRole('button',{name:'Desvincular',exact:true}).click();
+    await phone.locator('#pairing-required').waitFor();
+    assert.equal((await mobile.request.get(server.url+'/api/open-cards')).status(),428);
+    const relink=await api(desktop,server.url,'pairing/code',{name:'Caixa novamente'});
+    await phone.getByLabel('Código do caixa',{exact:true}).fill(relink.code);
+    await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
+    await phone.locator('#pos-workspace').waitFor();
+    checks.push('Desvincular pelo celular bloqueia o atendimento imediatamente; um novo código do computador permite voltar.');
+    await api(desktop,server.url,'pairing/revoke',{reason:'Teste de bloqueio dos celulares'});
+    await phone.locator('#pairing-required').waitFor();
+    await recovered.locator('#pairing-required').waitFor();
+    await phone.reload();
+    await phone.locator('#pairing-required').waitFor();
+    assert.equal((await mobile.request.get(server.url+'/api/products')).status(),428);
+    checks.push('Revogar os vínculos no computador bloqueia todos os celulares em tempo real e impede voltar por recarregamento.');
     assert.deepEqual(pageErrors,[],'Erros de JavaScript no navegador');
     writeFileSync(join(output,'resultado.json'),JSON.stringify({checks,pageErrors},null,2));
     for (const check of checks) console.log('OK '+check);

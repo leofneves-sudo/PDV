@@ -37,6 +37,7 @@ export const navigation = [
 export const allowed = (user,permission) => Array.isArray(permission) ?
   permission.some(key=>user?.permissions[key]) : !!user?.permissions[permission];
 export const permissionsFor = (state,key) => allowed(state.me,key);
+export const pairingNeeded = state => !!state.config?.pairingRequired && !state.pairing?.reader;
 export function initialView(user,fragment) {
   if (allowed(user,'operate')) {
     if (fragment==='#leitor') return 'scanner';
@@ -100,7 +101,8 @@ export function shell(state) {
   return `<div class="layout">
     <aside id="sidebar" class="sidebar"><div class="logo"><img src="/brand.svg" alt="" width="39" height="39"><div>Last Place<small>PDV</small></div></div>
       <nav aria-label="Menu principal">${links}</nav>
-      <div class="sidebar-bottom">${can('operate')?btn('Parear caixa','terminal',{ico:'terminal',cls:'nav-minor'}):''}
+      <div class="sidebar-bottom">${can('operate')?(state.config?.pairingRequired?
+        btn('Vínculo com caixa','navigate',{ico:'link',cls:'nav-minor',attrs:'data-view="scanner"'}):btn('Parear caixa','terminal',{ico:'terminal',cls:'nav-minor'})):''}
         ${btn('Bloquear sessão','lock',{ico:'lock',cls:'nav-minor'})}</div>
     </aside>
     <button type="button" id="nav-backdrop" data-action="menu" aria-label="Fechar menu"></button>
@@ -113,6 +115,21 @@ export function shell(state) {
     </header><div id="connection-banner" class="connection-banner" ${state.online?'hidden':''}>${icon('wifi',19)} Sem conexão com o servidor. Aguarde a reconexão antes de confirmar operações.</div>
     <main id="main" class="main" tabindex="-1"><div class="loading">Carregando…</div></main></div>
   </div>`;
+}
+
+export function pairingView(state,form) {
+  return `<div class="pairing-layout" id="pairing-required">
+    <header class="pairing-topbar"><div class="auth-brand"><img src="/brand.svg" alt="" width="36" height="36"> Last Place PDV</div>
+      <div class="pairing-tools">${themeButton(state.theme)}${btn('Sair','lock',{ico:'lock'})}</div></header>
+    <main id="main" class="pairing-main"><section class="panel pairing-card" aria-labelledby="pairing-title">
+      <div class="auth-icon">${icon('link',25)}</div><h1 id="pairing-title">Vincule este celular ao caixa</h1>
+      <p>O vínculo com o computador é obrigatório para usar o sistema neste celular.</p>
+      <ol><li>No computador, abra o PDV em <strong>localhost:3000</strong> e entre na sua conta.</li>
+        <li>Clique em <strong>Parear caixa</strong> e depois em <strong>Gerar código</strong>.</li>
+        <li>Digite abaixo os seis números exibidos no computador. O código vale por dois minutos.</li></ol>
+      ${form}
+      <p class="pairing-help">${h(state.me.name)} · Se o vínculo for removido ou a sessão do caixa encerrar, será necessário vincular novamente.</p>
+    </section></main></div>`;
 }
 
 const tones = ['#5969ee','#26ac99','#f2a94d','#8d79ed','#ed7d9e','#a4aeca'];
@@ -380,14 +397,14 @@ export function mobileCheckout(state) {
 export function orderTabs(state) {
   const cards=new Map((state.openCards?.cards || []).map(card=>[card.id,{...card,order:{id:card.order_id}}]));
   for (const [id,card] of state.scanned) cards.set(id,card);
-  return [...cards.values()].filter(card=>!state.local?.hiddenCards?.includes(card.id)).map(card=>{
+  return [...cards.values()].filter(card=>card.order || !state.local?.hiddenCards?.includes(card.id)).map(card=>{
     const current=state.card?.id===card.id;
     const number=cardNumber(card.number);
     const status=card.order?(current?'Em atendimento':'Em aberto'):'Disponível';
     return `<div class="order-tab${card.order?' is-open':''}${current?' current':''}">
       <button type="button" class="btn order-tab-select" data-action="switch-card" ${ID(card.id)} ${current?'aria-current="true"':''}>
         <span><strong>#${number}</strong><small>${status}</small></span>${current?`<span class="order-tab-check">${icon('check',15)}</span>`:''}
-      </button>${iconBtn(`Ocultar cartão #${number} da fila`,'hide-card','x',ID(card.id))}</div>`;
+      </button>${iconBtn(card.order?`Encerrar comanda #${number}`:`Ocultar cartão #${number} da fila`,card.order?'close-card':'hide-card','x',ID(card.id))}</div>`;
   }).join('');
 }
 export function openOrderNavigation(state) {
@@ -401,6 +418,7 @@ export function openOrderNavigation(state) {
 
 export function scannerView(state) {
   const paired=state.pairing.reader;
+  const required=state.config?.pairingRequired;
   return `${header('Leitor de QR','',btn('Voltar ao atendimento','navigate',{ico:'cart',attrs:'data-view="pos"'})+
     (permissionsFor(state,'scan_number')?btn('Número do cartão','ext-manual',{ico:'ticket'}):''),'scanner-heading')}
     <div class="scanner-layout">
@@ -424,14 +442,14 @@ export function scannerView(state) {
       <aside class="scanner-options">
         ${panel('Onde abrir a comanda','',`<div class="scanner-settings">
           <div class="scan-destinations" role="group" aria-label="Destino da leitura">
-            <label class="radio-tile"><input type="radio" name="scan-mode" value="direct" ${state.scanMode==='direct'?'checked':''}><span>${icon('camera')}<strong>Neste dispositivo</strong><small>Atenda por aqui após ler o cartão.</small></span></label>
+            ${required?'':`<label class="radio-tile"><input type="radio" name="scan-mode" value="direct" ${state.scanMode==='direct'?'checked':''}><span>${icon('camera')}<strong>Neste dispositivo</strong><small>Atenda por aqui após ler o cartão.</small></span></label>`}
             <label class="radio-tile"><input type="radio" name="scan-mode" value="paired" ${state.scanMode==='paired'?'checked':''} ${paired?'':'disabled'}><span>${icon('terminal')}<strong>No caixa e neste celular</strong><small id="paired-label">${paired?`${h(paired.name)} · ${paired.online?'Online':'Indisponível'}`:'Vincule o celular ao caixa.'}</small></span></label>
           </div>
           <div class="scanner-pair">
             <h3>Vincular celular ao caixa</h3>
             <p>Gere o código no computador e insira no celular.</p>
             <div class="scanner-pair-actions">
-              ${btn('Gerar código no caixa','terminal',{ico:'terminal'})}
+              ${required?'':btn('Gerar código no caixa','terminal',{ico:'terminal'})}
               ${btn(paired?'Trocar caixa':'Inserir código','pair-reader',{ico:'link',cls:'outline'})}
               ${paired?btn('Desvincular','unlink-reader',{cls:'text-btn'}):''}
             </div>

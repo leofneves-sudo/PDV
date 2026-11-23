@@ -136,9 +136,9 @@ export function terminalForm(pairing,code=null) {
     ${code?`<div class="pair-code span-two"><span>Código de pareamento</span><strong>${h(code.code)}</strong><small id="pair-expiry"></small></div>`:''}
     ${pairing.readers.length?`<div class="span-two active-readers"><strong>Leitores vinculados</strong><p>${pairing.readers.map(row=>`${h(row.name)} (${row.count})`).join(' · ')}</p>${btn('Desvincular todos','revoke-readers',{ico:'x'})}</div>`:''}`,submit(code?'Gerar outro código':'Gerar código'));
 }
-export function readerForm() {
+export function readerForm({required=false}={}) {
   return form('pair-reader',`<p class="dialog-note span-two">Digite os seis números exibidos no caixa.</p>`+
-    lab('Código do caixa',input('code','','required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autofocus'),'span-two'),submit('Vincular celular'));
+    lab('Código do caixa',input('code','','required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autofocus'),'span-two'),submit('Vincular celular'),required?'':close());
 }
 export function pickerRows(state,term) {
   const key=normalize(term);
@@ -164,6 +164,20 @@ export function discountForm(order) {
 }
 export function confirmation(name,text,id,action,hidden='') {
   return form(name,identity(id)+hidden+`<p class="dialog-note span-two">${h(text)}</p>`+reason()+(name==='cancel-order'?adminConfirm():''),submit(action,'danger-btn'));
+}
+export function closeOrderView(order,state) {
+  const booked=order.payments.some(payment=>payment.state!=='void');
+  if (!order.items.length && !booked) {
+    return form('cancel-order',identity(order.id)+
+      '<p class="dialog-note span-two">A comanda está vazia. Confirme para cancelar o atendimento e liberar o cartão.</p>'+
+      lab('Motivo',textarea('reason','Encerramento de comanda vazia pelo botão X','required minlength="3" maxlength="400" rows="2"'),'span-two')+
+      adminConfirm(),submit('Confirmar encerramento','danger-btn'));
+  }
+  return body(`<p><strong>Comanda #${cardNumber(order.number)}</strong> · Total ${money(order.total)}</p>
+    <p>${booked?'Esta comanda possui pagamentos. Confira as parcelas e quite o saldo para concluir.':'Receba o pagamento para concluir a venda ou cancele o atendimento para liberar o cartão e as reservas.'}</p>
+    ${!permissionsFor(state,'checkout')?'<p class="dialog-note">O recebimento deve ser feito por um operador com permissão de pagamento.</p>':''}`,
+    close()+(permissionsFor(state,'checkout')?btn('Receber e fechar','close-card-payment',{ico:'wallet',cls:'primary'}):'')+
+    (!booked?btn('Cancelar atendimento','close-card-cancel',{cls:'danger-btn'}):''));
 }
 export function paymentView(order,cfg) {
   const open=order.total-order.confirmed-order.pending;

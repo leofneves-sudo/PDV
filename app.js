@@ -66,6 +66,10 @@ async function api(path,{body}={}) {
   const data=await response.json().catch(()=>null);
   if (!response.ok || !data) {
     if (response.status===401 && state.me && path!=='login') locked();
+    if (response.status===428 && state.me) {
+      state.config.pairingRequired=true;
+      showPairingGate();
+    }
     throw new ApiError(data?.error || 'O servidor não confirmou a operação.',response.status);
   }
   return data;
@@ -110,7 +114,7 @@ async function restoreTabs() {
   const open=await loadOpenCards().catch(()=>({total:null,cards:[]}));
   if (currentUser!==authVersion || !state.me) return;
   state.openCards=open;
-  const first=open.cards.find(card=>!state.local.hiddenCards.includes(card.id));
+  const first=open.cards[0];
   const ids=[...new Set([...(snapshot?.ids || []),...(first?[first.id]:[])])];
   const entries=await Promise.allSettled(ids.map(id=>api('cards/'+id)));
   if (currentUser!==authVersion || !state.me) return;
@@ -163,6 +167,22 @@ function showTerminal(code=null) {
   tick();
   pairingTimer=setInterval(tick,1000);
 }
+function showPairingGate() {
+  if (!state.me || !state.config?.pairingRequired) return;
+  state.pairing={reader:null,readers:[]};
+  if (state.view==='pairing' && $('#pairing-required')) return;
+  renderId++;
+  scanner.stop();
+  closeModal();
+  state.view='pairing';
+  state.card=null;
+  state.scanned.clear();
+  state.openCards={total:null,cards:[]};
+  state.notes.clear();
+  state.products=[];
+  printArea.replaceChildren();
+  app.innerHTML=views.pairingView(state,modals.readerForm({required:true}));
+}
 function locked(message='') {
   authVersion++;
   events?.close();
@@ -210,7 +230,7 @@ async function bootstrap() {
     const config=await api('session');
     state.config=config;
     timeZone(config.timezone);
-    if (config.user) await enter(config.user);
+    if (config.user) await enter(config.user,config);
     else app.innerHTML=views.auth(config,true,state.theme);
   } catch {
     app.innerHTML=views.auth(state.config,false,state.theme);
@@ -218,17 +238,19 @@ async function bootstrap() {
     booting=false;
   }
 }
-async function enter(user) {
+async function enter(user,config=null) {
   authVersion++;
+  state.config=config || await api('session');
   state.me=user;
   state.config.user=user;
   state.config.initialized=true;
   state.config.setup=false;
   state.online=true;
-  state.scanMode=sessionStorage.getItem('pdv.reader.'+user.started_at) || 'direct';
-  state.pairing={reader:null,readers:[]};
+  state.scanMode=state.config.pairingRequired?'paired':sessionStorage.getItem('pdv.reader.'+user.started_at) || 'direct';
+  state.pairing=state.config.pairing || {reader:null,readers:[]};
   const view=views.initialView(user,location.hash);
   startEvents();
+  if (views.pairingNeeded(state)) return showPairingGate();
   await restoreTabs();
   if (state.me) await navigate(view);
 }
@@ -286,7 +308,7 @@ function scheduleRefresh() {
     try {
       await refresh();
     } catch (error) {
-      if (error.status && error.status!==401 && error.status!==403) toast(error.message,'error');
+      if (error.status && ![401,403,428].includes(error.status)) toast(error.message,'error');
     } finally {
       refreshActive=false;
       if (refreshPending) scheduleRefresh();
@@ -355,6 +377,7 @@ function focusAfter(focus) {
   if (target && focus.caret) target.setSelectionRange(...focus.caret);
 }
 function renderPage() {
+  if (views.pairingNeeded(state)) return showPairingGate();
   const main=$('#main');
   if (!main || !state.view) return;
   const focus=focusBefore();
@@ -373,6 +396,7 @@ function renderPage() {
   updatePayment();
 }
 async function navigate(view,{preserveModal=false}={}) {
+  if (views.pairingNeeded(state)) return showPairingGate();
   const link=views.navigation.find(item=>item[0]===view);
   if (link && !can(link[3])) return;
   if (!preserveModal) closeModal();
@@ -401,6 +425,13 @@ async function refresh() {
   if (stamp!==renderId || !state.me) return;
   const updated=JSON.stringify(state.me)!==JSON.stringify(config.user);
   state.me=config.user;
+  state.config=config;
+  state.pairing=config.pairing || {reader:null,readers:[]};
+  if (views.pairingNeeded(state)) return showPairingGate();
+  if (view==='pairing') {
+    await restoreTabs();
+    return navigate(views.initialView(state.me,location.hash));
+  }
   if (updated) {
     const next=views.navigation.find(item=>item[0]===view && can(item[3]))?.[0] ||
       views.navigation.find(item=>can(item[3]))?.[0] || 'account';
@@ -507,8 +538,30 @@ function setCard(card,activate=true) {
 }
 function finishCard(order) {
   state.scanned.delete(order.card_id);
+  clearTimeout(state.notes.get(order.id)?.timer);
   state.notes.delete(order.id);
   if (state.card?.id===order.card_id) state.card=null;
+  const open=state.openCards;
+  const cards=open.cards.filter(card=>card.id!==order.card_id || card.order_id!==order.id);
+  state.openCards={...open,cards,total:open.total==null?null:Math.max(0,open.total-(open.cards.length-cards.length))};
+  saveTabs();
+  renderPos();
+}
+async function requestCardClosure(id) {
+  if (!state.online) throw new Error('Sem conexão. Aguarde o servidor para encerrar a comanda.');
+  const version=authVersion;
+  await mutationQueue.catch(()=>{});
+  const known=state.scanned.get(id)?.order;
+  if (known) await flushNotes(known.id);
+  const card=await api('cards/'+id);
+  if (version!==authVersion || !state.me) return;
+  if (card.order) {
+    await receiveCard(id,card);
+    return showModal(`Encerrar comanda #${cardNumber(card.number)}`,modals.closeOrderView(card.order,state),{order:card.order});
+  }
+  state.local.hiddenCards=[...new Set([...(state.local.hiddenCards || []),id])];
+  state.scanned.delete(id);
+  if (state.card?.id===id) state.card=null;
   saveTabs();
   renderPos();
 }
@@ -721,8 +774,8 @@ async function actions(action,element) {
         btn('Voltar','close-modal')+btn('Desvincular','unlink-confirm',{cls:'danger-btn'})));
     case 'unlink-confirm':
       state.pairing=await send('pairing/unlink');
-      state.scanMode='direct';
-      sessionStorage.setItem('pdv.reader.'+state.me.started_at,'direct');
+      state.scanMode=state.config.pairingRequired?'paired':'direct';
+      sessionStorage.setItem('pdv.reader.'+state.me.started_at,state.scanMode);
       closeModal();
       renderPage();
       return toast('Celular desvinculado.');
@@ -747,12 +800,24 @@ async function actions(action,element) {
       $(views.posMobilePanel(state)==='catalog'?'#catalog-heading':'#order-panel')?.focus({preventScroll:true});
       return;
     case 'hide-card':
-      state.local.hiddenCards=[...new Set([...(state.local.hiddenCards || []),id])];
-      state.scanned.delete(id);
-      if (state.card?.id===id) state.card=null;
-      saveTabs();
+    case 'close-card': return requestCardClosure(id);
+    case 'close-card-payment': {
+      const order=dialogState.order;
+      if (!order) return;
+      await mutationQueue.catch(()=>{});
+      await flushNotes(order.id);
+      const card=await api('cards/'+order.card_id);
+      if (!card.order || card.order.id!==order.id) throw new Error('Esta comanda foi encerrada. Confira o histórico ou leia o cartão novamente.');
+      setCard(card);
       renderPos();
-      return;
+      return showPayment(card.order);
+    }
+    case 'close-card-cancel': {
+      const order=dialogState.order;
+      if (!order) return;
+      return showModal(`Cancelar comanda #${cardNumber(order.number)}`,modals.confirmation('cancel-order',
+        'O atendimento será cancelado e o cartão e as reservas serão liberados.',order.id,'Confirmar cancelamento'),{order});
+    }
     case 'open-order':
       state.local.posMobilePanel='catalog';
       return applyCard(await send(`cards/${id}/open`));
@@ -994,13 +1059,18 @@ async function submit(form,name,fields,context) {
     case 'revoke-readers':
       state.pairing=await send('pairing/revoke',{reason:fields.reason});
       return showTerminal();
-    case 'pair-reader':
+    case 'pair-reader': {
+      const wasGate=state.view==='pairing';
       state.pairing=await send('pairing/link',fields);
       state.scanMode='paired';
       sessionStorage.setItem('pdv.reader.'+state.me.started_at,'paired');
       closeModal();
-      renderPage();
-      return toast(`Vinculado a ${state.pairing.reader.name}.`);
+      if (wasGate) {
+        await restoreTabs();
+        await navigate(views.initialView(state.me,location.hash));
+      } else renderPage();
+      return toast(`Vinculado a ${state.pairing.reader?.name || 'caixa'}.`);
+    }
     case 'product': {
       const category=fields.category.trim();
       const originalCategory=state.products.find(product=>product.category.toLocaleUpperCase('pt-BR')===category)?.category;
@@ -1094,6 +1164,7 @@ async function submit(form,name,fields,context) {
       const order=await send(`orders/${id}/cancel`,{reason:fields.reason,approval:modals.approvalFrom(fields)});
       finishCard(order);
       closeModal();
+      scheduleRefresh();
       return toast('Comanda cancelada.');
     }
     case 'refund':
@@ -1212,8 +1283,8 @@ document.addEventListener('change',event=>{
     state.vibrate=field.checked;
     localStorage.setItem('pdv.vibrate',String(field.checked));
   } else if (field.name==='scan-mode') {
-    state.scanMode=field.value;
-    sessionStorage.setItem('pdv.reader.'+state.me.started_at,field.value);
+    state.scanMode=state.config.pairingRequired?'paired':field.value;
+    sessionStorage.setItem('pdv.reader.'+state.me.started_at,state.scanMode);
   }
   else if (field.id==='camera-select') scanner.setCamera(field.value);
   else if (field.id==='user-role') $('#permissions-field').hidden=field.value==='admin';

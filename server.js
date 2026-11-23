@@ -56,6 +56,23 @@ function local(req) {
   return ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress) &&
     /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(req.headers.host || '');
 }
+function requiresPairing(req) {
+  return !local(req) || !!req.headers.forwarded || !!req.headers['x-forwarded-for'] ||
+    req.headers['sec-ch-ua-mobile']==='?1' || /mobile|android|iphone|ipad|ipod/i.test(req.headers['user-agent'] || '');
+}
+function linkedTerminal(actor) {
+  const connection=get('SELECT terminal,name FROM pairings WHERE reader=?',actor.session_id);
+  const target=connection && findSession(connection.terminal);
+  return target && can(target,'operate') ? {connection,target} : null;
+}
+function requirePairing(req,actor,path) {
+  if (!requiresPairing(req)) return;
+  if (['events','pairing','pairing/link','pairing/unlink'].includes(path)) return;
+  if (['pairing/code','pairing/revoke'].includes(path)) {
+    fail('Gerencie os vínculos no computador do caixa, pelo endereço localhost.',403);
+  }
+  if (!linkedTerminal(actor)) fail('Vincule este celular ao caixa no computador para usar o sistema.',428);
+}
 function setupAllowed(req) {
   return local(req) && !req.headers.forwarded && !req.headers['x-forwarded-for'] &&
     !get('SELECT id FROM users LIMIT 1');
@@ -150,7 +167,7 @@ function stream(req,res,actor) {
   });
 }
 function pairingInfo(actor) {
-  const connection = get('SELECT terminal,name FROM pairings WHERE reader=?',actor.session_id);
+  const connection = linkedTerminal(actor)?.connection;
   return {
     reader:connection ? {name:connection.name,online:clients.has(connection.terminal) && !!findSession(connection.terminal)} : null,
     readers:all(`SELECT u.name,COUNT(*) count FROM pairings p JOIN sessions s ON s.id=p.reader JOIN users u ON u.id=s.user_id
@@ -199,7 +216,7 @@ function scan(actor,body) {
     const pairing = get('SELECT * FROM pairings WHERE reader=?',actor.session_id);
     const target = pairing && findSession(pairing.terminal);
     const streams = target && clients.get(target.session_id);
-    if (!streams?.size || !can(target,'operate')) fail('Caixa pareado indisponível. Verifique a conexão ou escolha operar no celular.',409);
+    if (!streams?.size || !can(target,'operate')) fail('Caixa vinculado indisponível. Abra o sistema no computador e confira a conexão.',409);
     ops.grantCard(target.session_id,card.id);
     ops.grantCard(actor.session_id,card.id);
     for (const socket of streams) event(socket,'card',{id:card.id,number:card.number});
@@ -275,7 +292,7 @@ function route(actor,method,path,body,query,ip) {
       return okay(tx(()=>saveUser(actor,body)),true);
     }
     if (path.startsWith('pairing/')) {
-      allow(actor,'operate');
+      if (!['pairing/link','pairing/unlink'].includes(path)) allow(actor,'operate');
       if (path === 'pairing/code') return okay(pairingCode(actor,body));
       if (path === 'pairing/link') return okay(pair(actor,body,ip),true);
       if (path === 'pairing/unlink') {
@@ -372,6 +389,7 @@ async function handle(req,res) {
   if (method==='POST') originCheck(req);
   if (path==='session' && method==='GET') {
     return send(res,{user:actor ? publicUser(actor) : null,setup:setupAllowed(req),initialized:!!get('SELECT id FROM users LIMIT 1'),
+      pairingRequired:requiresPairing(req),pairing:actor ? pairingInfo(actor) : null,
       timezone:reports.timezone,permissions,defaults,methods,origins});
   }
   if (path==='setup' && method==='POST') {
@@ -422,6 +440,7 @@ async function handle(req,res) {
     return;
   }
   if (!actor) fail('Entre com seu usuário para continuar.',401);
+  requirePairing(req,actor,path);
   if (path==='events' && method==='GET') return stream(req,res,actor);
   if (method==='GET' && /^products\/\d+\/image$/.test(path)) {
     const id=integer(Number(path.split('/')[1]),'Produto',1,Number.MAX_SAFE_INTEGER);
@@ -453,6 +472,7 @@ async function handle(req,res) {
     const value=await reportPool.query(path,actor,searchParams);
     const active=findSession(hash);
     if (!active) fail('Entre com seu usuário para continuar.',401);
+    requirePairing(req,active,path);
     if (active.role!==actor.role || active.permissions!==actor.permissions) fail('As permissões mudaram. Atualize a página.',403);
     if (res.destroyed) return;
     if (path.endsWith('.csv')) {
@@ -466,6 +486,8 @@ async function handle(req,res) {
   // Revalida o operador após receber o corpo, inclusive após um bloqueio noutro dispositivo.
   const current = findSession(hash);
   if (!current) fail('Entre com seu usuário para continuar.',401);
+  requirePairing(req,current,path);
+  if (requiresPairing(req) && path==='scan' && method==='POST') body.mode='paired';
   const result=route(current,method,path,body,searchParams,ip);
   send(res,result.data);
   if (result.changed) broadcast();
