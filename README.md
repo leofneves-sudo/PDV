@@ -2,30 +2,208 @@
 
 PDV local para loja física, com atendimento touchscreen, cartões QR reutilizáveis e leitura contínua pelo celular. A instalação começa com o banco vazio. Os cadastros e as vendas são gravados em SQLite.
 
+## Guia de inicialização
+
+- [Como os dois servidores funcionam](#como-os-dois-servidores-funcionam)
+- [Atalhos e comandos](#atalhos-e-comandos)
+- [Preparar no Windows](#preparar-no-windows)
+- [Iniciar no macOS](#iniciar-no-macos)
+- [Uso no dia a dia](#uso-no-dia-a-dia)
+- [Iniciar pelo terminal](#iniciar-pelo-terminal)
+- [Parar e reiniciar os servidores](#parar-e-reiniciar-os-servidores)
+- [Arquivos de apoio e logs](#arquivos-de-apoio-e-logs)
+- [Resolver problemas ao iniciar](#resolver-problemas-ao-iniciar)
+- [Acesso pelo celular e vínculo com o PC](#acesso-pelo-celular)
+
+## Como os dois servidores funcionam
+
+**Os dois servidores rodam no computador da loja.** O celular acessa o sistema pelo navegador e não precisa instalar Node.js nem receber a pasta do projeto.
+
+| Serviço | Endereço padrão | Função |
+| --- | --- | --- |
+| Servidor do PDV no computador | `http://localhost:3000` | Executa o sistema e grava produtos, comandas e vendas no banco SQLite. É o endereço usado pelo caixa no próprio computador. |
+| Acesso HTTPS do celular | `https://IP_DO_COMPUTADOR:3443/#leitor` | Recebe os acessos da rede local e encaminha as operações para o mesmo PDV do computador. O HTTPS permite usar a câmera do celular. |
+
+Os dispositivos usam o mesmo banco de dados. As alterações das comandas são transmitidas automaticamente entre as sessões conectadas. O acesso móvel depende do servidor do PDV estar funcionando.
+
+**No celular, use o IP do computador, nunca `localhost`.** No celular, `localhost` apontaria para o próprio telefone. Consulte o endereço correto em `data/inicializador/enderecos.txt` depois de iniciar os serviços. Por exemplo, se o IP do computador for `192.168.1.100`, o acesso será `https://192.168.1.100:3443/#leitor`; esse IP é apenas um exemplo.
+
+## Atalhos e comandos
+
+| Opção | Onde usar | O que faz |
+| --- | --- | --- |
+| **Iniciar Last Place PDV**, criado por `npm run atalho` | Área de Trabalho do Windows | Com dois cliques, inicia os dois serviços em segundo plano e abre o sistema no navegador do PC. É a opção para o uso diário no Windows. |
+| [Iniciar Last Place PDV.cmd](Iniciar%20Last%20Place%20PDV.cmd) | Dentro da pasta do projeto, no Windows | Inicia os dois serviços e abre o navegador. Precisa permanecer junto da pasta `scripts`. |
+| [Iniciar Last Place PDV.command](Iniciar%20Last%20Place%20PDV.command) | Dentro da pasta do projeto, no macOS | Inicia os dois serviços e abre o navegador. O Terminal mostra o resultado da inicialização. |
+| `npm run iniciar` | Terminal aberto na pasta do projeto | Executa o mesmo iniciador dos atalhos: liga PC e acesso móvel e abre o navegador. Funciona no Windows, macOS e Linux com Node.js instalado. |
+| `npm start` | Terminal aberto na pasta do projeto | Liga **somente o servidor do PDV**, normalmente na porta `3000`. Mantenha esse terminal aberto. |
+| `npm run celular -- IP_DO_COMPUTADOR` | Outro terminal na pasta do projeto | Liga **somente o acesso HTTPS do celular**, normalmente na porta `3443`. Precisa do servidor do PDV já ligado. |
+
+O arquivo [atalhos/Iniciar Last Place PDV.lnk](atalhos/Iniciar%20Last%20Place%20PDV.lnk) é uma cópia do atalho original deste projeto. Ele contém os caminhos do computador em que foi criado. **Em outro computador, crie seu próprio atalho com `npm run atalho`.** Baixar apenas o `.lnk` ou copiar apenas o `.cmd` para a Área de Trabalho não instala o sistema.
+
 ## Instalar e iniciar
 
-No computador que vai hospedar o PDV, instale o Node.js 24 ou mais recente. Abra o terminal na pasta do projeto.
+Instale o **Node.js 24 ou mais recente** no computador da loja. O npm acompanha a instalação do Node.js. Baixe a pasta completa do projeto e extraia o ZIP antes de executar os arquivos. Se usar Git, clone o repositório para uma pasta local.
+
+Mantenha o projeto em uma pasta definitiva. Na raiz devem estar, entre outros, `package.json`, `server.js`, os arquivos de inicialização e a pasta `scripts`. As dependências serão instaladas em `node_modules` pelo comando `npm ci`.
+
+### Preparar no Windows
+
+1. Abra o PowerShell na pasta do projeto. Nos comandos abaixo, `C:\Sistemas\PDV` é um exemplo: substitua pelo local onde você colocou o projeto.
+2. Confira as versões, instale as dependências e crie o atalho:
+
+   ```powershell
+   cd "C:\Sistemas\PDV"
+   node --version
+   npm.cmd --version
+   npm.cmd ci
+   npm.cmd run atalho
+   ```
+
+3. Aguarde o término de cada comando. A versão mostrada por `node --version` deve começar com `v24` ou um número maior.
+4. Confira a mensagem **Atalho criado**. O arquivo **Iniciar Last Place PDV** será colocado na Área de Trabalho do usuário, inclusive quando ela estiver redirecionada para o OneDrive.
+5. Dê dois cliques nesse atalho para iniciar os serviços. Ele abrirá o PDV no navegador quando os dois estiverem disponíveis.
+
+Nos exemplos de PowerShell, `npm.cmd` chama diretamente o executável do npm e evita depender da liberação de scripts `.ps1`. Em terminais que aceitam `npm` normalmente, os comandos equivalentes também funcionam.
+
+Faça essa preparação uma vez por instalação. Para o uso diário, basta abrir o atalho. Depois de mudar a pasta do projeto ou o local de instalação do Node.js, remova apenas o atalho antigo **Iniciar Last Place PDV** e execute `npm.cmd run atalho` novamente a partir da pasta correta. O gerador preserva um atalho existente que aponte para outro caminho, em vez de sobrescrevê-lo.
+
+Também é possível dar dois cliques em **Iniciar Last Place PDV.cmd** na raiz do projeto. Esse arquivo procura `scripts/iniciar.vbs` ao lado dele; por isso, mantenha-o na pasta original. Para ter um ícone na Área de Trabalho, use o atalho gerado pelo comando acima.
+
+### Iniciar no macOS
+
+1. Abra o Terminal na pasta extraída ou clonada do projeto.
+2. Confira o Node.js e instale as dependências:
+
+   ```sh
+   node --version
+   npm --version
+   npm ci
+   ```
+
+3. No Finder, dê dois cliques em **Iniciar Last Place PDV.command**, mantendo esse arquivo na raiz do projeto, junto de `scripts`.
+4. Aguarde os endereços aparecerem no Terminal e o navegador abrir o PDV.
+5. Depois da inicialização concluída, pode fechar essa janela do Terminal: os dois serviços foram iniciados em segundo plano.
+
+Se o arquivo perder a permissão de execução ao ser copiado, execute este comando na pasta do projeto e tente novamente:
 
 ```sh
-npm ci
+chmod +x "Iniciar Last Place PDV.command"
+```
+
+Para um acesso pela Mesa, crie um alias apontando para o arquivo original. Mantenha o `.command` junto do restante do projeto. Ele procura o Node.js no ambiente e nos locais usuais de instalação; também tenta carregar uma instalação feita com nvm.
+
+### Uso no dia a dia
+
+1. Ligue o computador e conecte-o à rede da loja, por Wi-Fi ou cabo. Conecte o celular à mesma rede local.
+2. Abra **Iniciar Last Place PDV** no Windows ou **Iniciar Last Place PDV.command** no macOS.
+3. Aguarde o navegador abrir `http://localhost:3000`. O iniciador identifica o IP local, inicia os serviços que faltam e aguarda as respostas do PC e do HTTPS do celular.
+4. Faça login no computador. Na primeira instalação, crie o administrador conforme a [configuração inicial](#configuração-inicial).
+5. Abra `data/inicializador/enderecos.txt` para consultar o endereço do celular. Digite esse endereço no navegador do telefone.
+6. Na primeira conexão de cada celular, instale e habilite a confiança no certificado público conforme a seção [Acesso pelo celular](#acesso-pelo-celular).
+7. Faça login no celular e conclua o vínculo obrigatório: no PC, use **Parear caixa → Gerar código**; no celular, digite os seis números exibidos.
+8. Mantenha o computador ligado e o sistema aberto na sessão do caixa para receber as leituras enviadas pelo celular.
+
+Se os serviços já estiverem ligados, o iniciador os reutiliza. Abrir o atalho novamente **não reinicia os processos existentes**. Cliques simultâneos são controlados para evitar inicializações duplicadas.
+
+Não é necessário executar `npm ci` nem gerar o atalho todos os dias. Abrir o atalho também não apaga cadastros, estoque, vendas ou comandas e não configura a inicialização automática com o Windows. Depois de reiniciar o computador, abra o atalho novamente.
+
+Fechar a aba ou a janela do navegador não desliga os servidores iniciados em segundo plano. Para o celular enviar leituras ao caixa, mantenha a página do computador aberta e autenticada. Ao sair da conta do PC ou expirar essa sessão, será necessário vincular o celular novamente.
+
+### Iniciar pelo terminal
+
+Para ligar os dois serviços e abrir o navegador, execute na pasta do projeto:
+
+```sh
+npm run iniciar
+```
+
+Para ligar os dois serviços sem abrir uma nova janela do navegador:
+
+```sh
+npm run iniciar -- --no-browser
+```
+
+No PowerShell, você pode usar `npm.cmd` no lugar de `npm` nesses comandos.
+
+Se precisar acompanhar as saídas de cada serviço no terminal, inicie-os separadamente. No primeiro terminal:
+
+```sh
 npm start
 ```
 
-### Iniciar pela Área de Trabalho no Windows
+No segundo terminal, substitua o IP pelo endereço real do computador na rede:
 
-Execute `npm run atalho` uma vez para criar **Iniciar Last Place PDV** na Área de Trabalho do usuário. Dê dois cliques no atalho para iniciar os servidores do computador e do celular em segundo plano e abrir `http://localhost:3000` no navegador padrão. O iniciador aguarda os dois serviços responderem e reutiliza os que já estiverem ligados. Cliques simultâneos não criam instâncias duplicadas.
+```sh
+npm run celular -- 192.168.1.100
+```
 
-O repositório inclui uma cópia do atalho original em [`atalhos/Iniciar Last Place PDV.lnk`](atalhos/Iniciar%20Last%20Place%20PDV.lnk). Esse arquivo aponta para a pasta deste computador. Em outro computador, gere um atalho próprio com `npm run atalho`. Também é possível dar dois cliques em [`Iniciar Last Place PDV.cmd`](Iniciar%20Last%20Place%20PDV.cmd), mantendo esse arquivo na raiz do projeto, junto da pasta `scripts`.
+Nesse modo manual, mantenha **os dois terminais abertos** e abra `http://localhost:3000` no navegador do PC. Para conferir o IP no Windows, use `ipconfig` e procure o IPv4 da conexão usada pela loja. No macOS/Linux, consulte os detalhes da conexão de rede do sistema. O comando do celular só aceita um IP privado atribuído ao próprio computador.
 
-O IP da rede local é identificado automaticamente. Os endereços ficam em `data/inicializador/enderecos.txt`; registros de inicialização e eventuais erros ficam na mesma pasta. O celular deve estar na mesma rede e confiar no certificado público do PDV. O iniciador mantém a verificação dos certificados HTTPS e não encerra processos já existentes. Se mover a pasta do projeto, execute `npm run atalho` novamente depois de remover o atalho antigo.
+### Parar e reiniciar os servidores
 
-Também é possível iniciar os dois serviços pelo terminal com `npm run iniciar`. O atalho apenas inicia os serviços quando aberto; ele não configura inicialização automática com o Windows.
+Conclua as operações em andamento antes de reiniciar os serviços. Se iniciou pelo modo manual, pressione **Ctrl+C em cada terminal**. Depois, abra o atalho ou execute `npm run iniciar` para ligar ambos novamente.
 
-### Iniciar com dois cliques no macOS
+Os atalhos iniciam os serviços em segundo plano e não oferecem um botão próprio para pará-los. No Windows, para localizar apenas os processos iniciados pelo atalho desta instalação, abra o PowerShell **na raiz do projeto** e execute:
 
-Depois de instalar as dependências com `npm ci`, dê dois cliques em [Iniciar Last Place PDV.command](Iniciar%20Last%20Place%20PDV.command) pelo Finder. Mantenha o arquivo na raiz do projeto. Ele inicia o servidor do computador e o acesso HTTPS do celular em segundo plano e abre o PDV no navegador padrão quando os dois estiverem disponíveis. Se já estiverem rodando, ele reutiliza os serviços.
+```powershell
+$pdvRoot = (Get-Location).Path
+$pdvServerPath = Join-Path $pdvRoot 'server.js'
+$pdvMobilePath = Join-Path $pdvRoot 'scripts\celular.cjs'
+$pdvProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" |
+    Where-Object {
+        $_.CommandLine -and (
+            $_.CommandLine.IndexOf($pdvServerPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $_.CommandLine.IndexOf($pdvMobilePath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        )
+    })
+$pdvProcesses | Select-Object ProcessId, CommandLine
+```
 
-O Terminal mostra os endereços do PDV. Você pode fechar a janela depois que o navegador abrir. Se o arquivo perder a permissão de execução ao ser copiado, execute `chmod +x "Iniciar Last Place PDV.command"` na pasta do projeto.
+Confira se os caminhos listados pertencem a essa pasta do PDV. Na mesma janela, encerre os processos dessa lista e inicie novamente:
+
+```powershell
+$pdvProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId }
+npm.cmd run iniciar
+```
+
+Se a lista estiver vazia, nenhum processo foi identificado com esses caminhos completos; serviços iniciados manualmente com caminhos relativos devem ser encerrados pelo terminal em que foram abertos. No macOS/Linux, encerre os processos `server.js` e `scripts/celular.cjs` desta instalação pelo monitor de processos do sistema. Reiniciar o computador também encerra os serviços.
+
+Reiniciar os servidores não cancela comandas nem zera o banco. Ao atualizar arquivos do projeto, recarregue as páginas do PC e do celular. Se houve alteração no código do servidor, reinicie os serviços para carregar a nova versão; abrir o atalho sobre um servidor já ligado apenas reutiliza a versão em execução.
+
+### Arquivos de apoio e logs
+
+Os caminhos abaixo são relativos à pasta do projeto e usam a configuração padrão:
+
+| Arquivo | Para que serve |
+| --- | --- |
+| `data/inicializador/enderecos.txt` | Mostra os endereços do PC e do celular obtidos na inicialização. |
+| `data/inicializador/iniciar.log` | Registra o início dos serviços, o reaproveitamento dos processos existentes e a conclusão da inicialização. |
+| `data/inicializador/computador.log` | Guarda a saída e os erros do servidor do PDV iniciado automaticamente. |
+| `data/inicializador/celular.log` | Guarda a saída e os erros do acesso HTTPS iniciado automaticamente. |
+| `data/inicializador/ultimo-erro.txt` | Contém a mensagem da última tentativa de inicialização que falhou. É removido quando a inicialização termina com sucesso. |
+| `data/inicializador/estado.json` | Registra os endereços e os PIDs dos serviços criados naquela execução. Serviços reaproveitados não entram na lista `started`. |
+| `data/https/balcao-ca.cer` | Certificado público usado para configurar a confiança nos celulares. |
+| `data/pdv.sqlite` | Banco de dados da loja. Ele permanece no computador do servidor. |
+
+Em caso de falha, comece por `ultimo-erro.txt` e confira o log do serviço indicado. Os atalhos não instalam as dependências automaticamente; execute `npm ci` durante a preparação ou depois de uma atualização que altere as dependências.
+
+### Resolver problemas ao iniciar
+
+| Situação | O que verificar |
+| --- | --- |
+| Node.js não encontrado ou versão incompatível | Instale o Node.js 24 ou mais recente, reabra o terminal e confira `node --version`. Gere novamente o atalho se o caminho do Node.js mudou. |
+| PowerShell impede a execução de `npm.ps1` | Use `npm.cmd ci`, `npm.cmd run atalho` e `npm.cmd run iniciar`, como nos exemplos do Windows. |
+| Falta um módulo ou aparece `Cannot find module` | Execute `npm ci` na raiz do projeto, onde está `package.json`. |
+| O `.cmd` pede a pasta `scripts` ou não encontra o iniciador | Extraia o projeto completo. Mantenha o `.cmd` na raiz e gere o atalho da Área de Trabalho com `npm.cmd run atalho`. |
+| O atalho aponta para uma pasta antiga ou outro computador | Remova apenas o atalho antigo do PDV e gere outro na pasta atual. A cópia `.lnk` do GitHub usa os caminhos da instalação original. |
+| O iniciador pede conexão com a rede | Conecte o computador à rede local da loja. Para usar apenas o PC sem rede local, inicie somente o PDV com `npm start`. |
+| Porta `3000` ou `3443` ocupada | Consulte os logs e identifique o serviço existente. O iniciador reaproveita serviços compatíveis e não encerra outros processos automaticamente. |
+| O PC abre, mas o celular não conecta | Confira a mesma rede local, o IP atual em `enderecos.txt`, o servidor móvel e a liberação do acesso no firewall da rede privada. Uma rede de convidados pode isolar os dispositivos. |
+| O navegador do celular rejeita o certificado ou não libera a câmera | Instale o certificado público desta instalação, habilite a confiança quando exigido e use o endereço HTTPS. Após trocar de computador ou recriar os certificados, confira o certificado instalado no celular. |
+| O celular mostra a tela de vínculo obrigatório | Entre no PC pelo `localhost`, gere um código e digite-o no celular em até dois minutos. O login sozinho não libera o uso móvel. |
+| O código foi recusado | Gere outro código no PC e mantenha a sessão do caixa online. Cada código tem um único uso. |
+| A atualização do projeto não aparece | Recarregue o navegador. Se mudou o servidor, encerre os serviços e inicie novamente; clicar de novo no atalho não reinicia processos existentes. |
 
 ### Configuração inicial
 
@@ -44,25 +222,51 @@ A primeira execução cria `data/pdv.sqlite`. Para mover ou copiar o banco, desl
 | `PDV_TIMEZONE` | `America/Sao_Paulo`. Fuso da loja para relatórios e horários exibidos. |
 | `PDV_ORIGIN` | Endereço completo acessado pelos dispositivos, incluindo HTTPS e porta, quando aplicável. |
 | `PDV_TLS_CERT` e `PDV_TLS_KEY` | Caminhos do certificado e da chave PEM para servir HTTPS diretamente. |
+| `PDV_LAN_IP` | IP privado do computador usado pelo iniciador. Quando omitido, é identificado automaticamente. |
+| `PDV_LAN_PORT` | `3443`. Porta do acesso HTTPS do celular. |
+| `PDV_LOCAL_PORT` | `3000`. Porta do PDV para o comando manual `npm run celular`; no iniciador é ajustada conforme `PDV_PORT`. |
+| `PDV_START_DIR` | `data/inicializador`. Pasta dos endereços, do estado e dos logs do iniciador. |
+| `PDV_LAN_CERT_DIR` | `data/https`. Pasta dos certificados do acesso móvel. |
+
+As variáveis de HTTPS direto são para a execução manual com `npm start`. O iniciador dos atalhos mantém o PDV em HTTP local e oferece o acesso móvel pelo serviço HTTPS separado. Se mudar portas ou pastas por variáveis de ambiente, use os valores configurados no lugar dos padrões dos exemplos.
 
 ## Acesso pelo celular
 
-Com o PDV já aberto no computador em `http://localhost:3000`, deixe o servidor rodando e abra um segundo terminal na pasta do projeto. O comando funciona no Windows, macOS e Linux e gera os certificados pelo Node.js, sem exigir OpenSSL instalado.
+**Se você usou o atalho ou `npm run iniciar`, o acesso do celular já foi iniciado.** Não é necessário abrir outro terminal nem executar novamente o comando do celular. Consulte `data/inicializador/enderecos.txt` e use o endereço HTTPS indicado.
+
+Se iniciou apenas com `npm start`, deixe esse terminal aberto e, em um segundo terminal na pasta do projeto, execute:
 
 ```sh
 npm run celular -- IP_DO_COMPUTADOR
 ```
 
-Use o IP do computador na rede local. O comando imprime o endereço HTTPS na porta `3443` e encaminha as leituras para o mesmo servidor usado pelo caixa. Mantenha os dois processos rodando e conecte o celular à mesma rede.
+Use o IP do computador na rede local. O comando funciona no Windows, macOS e Linux, imprime o endereço HTTPS na porta `3443` e gera os certificados pelo Node.js, sem exigir OpenSSL instalado. Mantenha os dois processos rodando e conecte o celular à mesma rede.
+
+### Preparar o certificado no celular
 
 Transfira `data/https/balcao-ca.cer` do computador para o celular. Esse é o certificado público da autoridade local do PDV. Os arquivos `.key` ficam no computador do servidor.
 
 - **iPhone** — Abra o arquivo recebido por AirDrop e instale o perfil em **Ajustes**. Depois ative a confiança em **Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado**. [Suporte da Apple](https://support.apple.com/pt-br/102390)
 - **Android** — Abra **Instalar certificado** nos ajustes de segurança, escolha **Certificado CA** e selecione o arquivo recebido. Os nomes dos menus variam conforme o aparelho.
 
-No celular, abra o endereço HTTPS exibido no terminal e faça login. **O vínculo com o computador é obrigatório antes de usar o sistema.** No computador, abra `http://localhost:3000`, entre na sua conta e clique em **Parear caixa → Gerar código**. Digite os seis números na tela de vinculação do celular. Cada código vale por dois minutos e pode ser usado uma vez.
+Depois de instalar e habilitar a confiança no certificado, abra o endereço HTTPS de `enderecos.txt` no navegador do celular. Essa preparação é feita para cada aparelho. Nas próximas aberturas, use o mesmo endereço enquanto o IP do computador permanecer igual. Se o IP mudar, reinicie os serviços e consulte o novo endereço no arquivo.
+
+### Vincular o celular ao computador
+
+**O vínculo é obrigatório antes de usar o sistema no celular, inclusive com uma conta de administrador.**
+
+1. No PC, abra `http://localhost:3000` e faça login. A configuração do primeiro administrador deve ser concluída nesse computador.
+2. No celular, abra o endereço HTTPS e faça login com a conta do operador. Será exibida a tela **Vincule este celular ao caixa**.
+3. No PC, clique em **Parear caixa**, informe um nome, como **Caixa 1**, e selecione **Gerar código**. Também é possível gerar o código pela tela **Leitor de QR** do computador.
+4. No celular, digite os seis números em **Código do caixa** e toque em **Vincular celular**. Cada código vale por dois minutos e pode ser usado uma única vez. Gere um código diferente para cada celular.
+5. Após liberar o acesso, abra **Leitor de QR → Ativar câmera**, autorize a câmera quando solicitado e leia o cartão. A leitura fica no modo **No caixa e neste celular**.
+6. Para um cartão livre, toque em **Iniciar atendimento**. Use **Produtos** para adicionar itens e **Comanda** para conferir as quantidades e o total. As alterações são compartilhadas com o PC conectado.
+
+Mantenha sessões distintas no PC e em cada celular. O vínculo válido é recuperado ao recarregar a página na mesma sessão. Sair da conta do celular exige um novo vínculo no próximo login. Desvincular o aparelho, revogar os vínculos pelo PC ou encerrar/expirar a sessão do caixa bloqueia novamente o acesso móvel. Isso não cancela as comandas que estão gravadas no servidor.
 
 ### Servidor HTTPS direto
+
+Esta é uma alternativa para configuração manual. Para o uso com os atalhos, utilize os dois serviços descritos acima. No modo direto, o acesso do computador para configurar e gerar os códigos deve continuar usando `localhost`, com o esquema e a porta definidos para esse serviço.
 
 1. Conclua a criação do administrador no localhost antes de ativar o acesso pela rede.
 2. Escolha um nome de rede ou IP fixo para o servidor. Use um certificado cujo nome ou IP conste no campo SAN e cuja autoridade seja confiável no computador do caixa e nos celulares. Se a loja usa uma autoridade privada, instale e habilite a confiança dessa autoridade nos dispositivos.
@@ -76,7 +280,7 @@ PDV_TLS_KEY=/caminho/chave.pem npm start
 ```
 
 4. Permita a porta no firewall da rede da loja. Conecte o celular ao mesmo Wi‑Fi, abra o endereço HTTPS no navegador e confira se o certificado foi aceito. A câmera exige um contexto seguro. A exceção de localhost vale para o computador que hospeda a página. [Documentação da câmera no navegador](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
-5. Entre com o usuário do celular, abra **Leitor de QR** e toque em **Ativar câmera**. Autorize o acesso quando o navegador perguntar. Escolha a câmera traseira e use a lanterna quando o aparelho oferecer essa opção. A vibração depende do suporte do navegador.
+5. Faça login no celular e conclua o vínculo obrigatório com o computador conforme as instruções anteriores. Depois, abra **Leitor de QR** e toque em **Ativar câmera**. Autorize o acesso quando o navegador perguntar. Escolha a câmera traseira e use a lanterna quando o aparelho oferecer essa opção. A vibração depende do suporte do navegador.
 
 Se a loja já tiver um proxy HTTPS, mantenha o Node acessível apenas na interface local do servidor, publique a origem HTTPS no proxy e defina `PDV_ORIGIN` com esse endereço. Preserve a transmissão contínua de `/api/events` e desative o buffering do proxy nessa rota.
 
