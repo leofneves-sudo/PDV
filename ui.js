@@ -41,6 +41,7 @@ const symbols = {
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M19 5l-1.5 1.5m-11 11L5 19"/>',
   rotate:'<path d="M4 13a8 8 0 1 0 2-6l-2 2m0-5v5h5"/>',
   tag:'<path d="M4 4h8l8 8-8 8-8-8V4Z"/><circle cx="8" cy="8" r="1"/>',
+  star:'<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"/>',
   wifi:'<path d="M3 8a14 14 0 0 1 18 0M6 12a9 9 0 0 1 12 0m-9 4a4.5 4.5 0 0 1 6 0m-3 4h.1"/>'
 };
 export const icon = (key,size=20) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${symbols[key] || ''}</svg>`;

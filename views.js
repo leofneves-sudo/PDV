@@ -88,11 +88,12 @@ export function auth(config,connected=true,theme='light') {
 }
 export function shell(state) {
   const can = key => permissionsFor(state,key);
-  const links = ['Operação','Cadastros','Administração'].map(group=>{
+  const groups=[['operation','Operação'],['records','Cadastros'],['administration','Administração']];
+  const links = groups.map(([section,group])=>{
     const options=navigation.filter(item=>item[4]===group && can(item[3]));
     if (!options.length) return '';
-    return `<div class="nav-group"><div class="nav-label">${group}</div>${options.map(([key,label,ico])=>
-      `<button type="button" class="navigation ${state.view===key?'current':''}" data-action="navigate" data-view="${key}" ${state.view===key?'aria-current="page"':''}>${icon(ico,20)}<span>${label}</span>${state.view===key?'<i></i>':''}</button>`
+    return `<div class="nav-group nav-group-${section}" role="group" aria-labelledby="nav-${section}"><h2 class="nav-label" id="nav-${section}">${group}</h2>${options.map(([key,label,ico])=>
+      `<button type="button" class="navigation ${state.view===key?'current':''}" data-action="navigate" data-view="${key}" title="${h(label)}" ${state.view===key?'aria-current="page"':''}>${icon(ico,20)}<span>${h(label)}</span></button>`
     ).join('')}</div>`;
   }).join('');
   const current = navigation.find(item=>item[0]===state.view)?.[1] || 'Conta';
@@ -263,11 +264,24 @@ export function productGrid(state) {
   if (!products.length) return empty('box',term?'Nenhum produto encontrado':'Nenhum produto disponível',term?'Tente outro nome ou código.':'Cadastre produtos ativos no catálogo.',
     permissionsFor(state,'products')?btn('Gerenciar produtos','navigate',{ico:'box',attrs:'data-view="products"'}):'');
   return `<div class="product-grid">${products.map(product=>{const expiry=productExpiry(product,state);return `<div class="tile-wrap"><button type="button" class="product-tile" data-action="add-item" ${ID(product.id)} aria-label="${h(`Adicionar ${product.name} à comanda${state.card?.order?' #'+cardNumber(state.card.number):''}`)}" ${!state.card?.order || state.online===false || !product.available || expiry.blocked?'disabled':''}>
-    <div class="tile-icon">${product.image?`<img src="${h(product.image)}" alt="" loading="lazy">`:icon('box',26)}</div>
-    <strong>${h(product.name)}</strong><small>${h(product.code)} · ${product.available ? `${num(product.available)} disponíveis` : 'Sem estoque'}</small>
+    ${product.image?`<img class="tile-image" src="${h(product.image)}" alt="" loading="lazy">`:''}
+    <strong class="tile-name">${h(product.name)}</strong><small class="tile-stock">${h(product.code)} · ${product.available ? `${num(product.available)} disponíveis` : 'Sem estoque'}</small>
     ${expiry.status==='none'?'':`<span class="tile-expiry">${expiryBadge(expiry)}</span>`}
     <div class="tile-bottom"><b>${money(product.price)}</b><span>${icon('plus',18)}</span></div></button>
-    ${btn(state.favorites.includes(product.id)?'★':'☆','ext-favorite',{cls:'favorite-button',attrs:`data-id="${product.id}" aria-label="${state.favorites.includes(product.id)?'Remover dos':'Adicionar aos'} favoritos"`})}</div>`;}).join('')}</div>`;
+    ${btn(state.favorites.includes(product.id)?'★':'☆','ext-favorite',{cls:'favorite-button',attrs:`data-id="${product.id}" aria-pressed="${state.favorites.includes(product.id)}" aria-label="${state.favorites.includes(product.id)?'Remover dos':'Adicionar aos'} favoritos"`})}</div>`;}).join('')}</div>`;
+}
+export function paymentDisabled(state) {
+  const order=state.card?.order;
+  return !state.online || !order?.items.length || !!(order.sale_blocks?.length && !order.payments?.some(row=>row.state!=='void'));
+}
+function paymentButton(state,classes) {
+  return btn(state.card.order.sale_blocks?.length?'Revisar pagamentos':'Receber pagamento','payment',
+    {ico:'wallet',cls:`primary pay-button ${classes}`,attrs:paymentDisabled(state)?'disabled':''});
+}
+function paymentAmount(order) {
+  return order.confirmed
+    ? {label:'Falta receber',value:order.total-order.confirmed}
+    : {label:'Total da comanda',value:order.total};
 }
 export function orderPanel(state) {
   const card=state.card;
@@ -280,7 +294,10 @@ export function orderPanel(state) {
     ${empty('ticket','Cartão disponível','Inicie uma comanda para registrar o atendimento.',
       btn('Iniciar atendimento','open-order',{ico:'plus',cls:'primary',attrs:ID(card.id)+(state.online===false?' disabled':'')}))}</section>`;
   const draft=state.notes.get(order.id);
-  return `<section class="panel order-panel"><div class="panel-heading order-title"><div><h2>Comanda #${cardNumber(card.number)}</h2><p>Atendimento #${order.id} · ${h(order.opened_name)} · ${dt(order.opened_at)}</p></div>${badge('open')}</div>
+  const amount=paymentAmount(order);
+  return `<section class="panel order-panel"><header class="order-title">
+    <div class="order-identity"><span class="order-identity-icon">${icon('ticket',24)}</span><div><h2>Comanda #${cardNumber(card.number)}</h2>
+    <p>Atendimento #${order.id} · ${h(order.opened_name)} · ${dt(order.opened_at)}</p></div></div>${badge('open','Em atendimento')}</header>
     <div class="order-content">
       ${order.sale_blocks?.length?`<div class="notice error" role="alert">Venda bloqueada por validade: ${order.sale_blocks.map(row=>h(row.name)).join(', ')}. Remova os itens ou regularize as validades ausentes.</div>`:''}
       <div class="customer-line"><span class="small-icon">${icon('user',19)}</span><div><small>Cliente</small><strong>${h(order.customer_name || 'Sem cliente vinculado')}</strong></div>
@@ -294,35 +311,44 @@ export function orderPanel(state) {
         </div><div class="item-tools">${can('item_price')?iconBtn('Alterar preço','item-price','pencil',ID(item.id)):''}
           ${can('item_remove')?iconBtn('Remover item','item-remove','trash',ID(item.id)):''}</div>
       </article>`).join(''):empty('cart','A comanda está vazia','Toque em um produto para incluir.')}</div>
+      <div class="order-breakdown">
+        <div class="sum-line"><span>Subtotal</span><b>${money(order.subtotal)}</b></div>
+        ${order.discount || can('operate')?`<div class="sum-line"><span>Desconto ${can('operate')?btn('Editar','discount',{ico:'tag',cls:'text-btn'}):''}</span><b>${money(order.discount)}</b></div>`:''}
+        ${order.confirmed?`<div class="sum-line"><span>Confirmado</span><b>${money(order.confirmed)}</b></div>`:''}
+      </div>
       ${lab('Observações',textarea('order-notes',draft?.value ?? order.notes,'id="order-notes" placeholder="Adicionar observação…" rows="2" maxlength="2000"'))}
       <div id="notes-status" class="notes-status" role="status">${h(draft?.error || (draft?'Salvando…':'Salvamento automático'))}</div>
       ${draft?.error?`<div id="notes-actions">${btn('Usar texto salvo','notes-discard')}${btn('Salvar meu texto','notes-retry',{cls:'outline'})}</div>`:'<div id="notes-actions"></div>'}
-    </div>
-    <div class="order-summary">
-      <div class="sum-line"><span>Subtotal</span><b>${money(order.subtotal)}</b></div>
-      ${order.discount || can('operate')?`<div class="sum-line"><span>Desconto ${can('operate')?btn('Editar','discount',{ico:'tag',cls:'text-btn'}):''}</span><b>${money(order.discount)}</b></div>`:''}
-      <div class="sum-total"><span>Total da comanda</span><strong>${money(order.total)}</strong></div>
-      ${can('checkout')?btn(order.sale_blocks?.length?'Revisar pagamentos':'Receber pagamento','payment',{ico:'wallet',cls:'primary full pay-button',attrs:(!order.items.length || !state.online || order.sale_blocks?.length && !order.payments?.some(row=>row.state!=='void'))?'disabled':''}):''}
-      ${order.confirmed || order.pending?`<p class="notes-status">Confirmado: ${money(order.confirmed)} · Saldo: ${money(order.total-order.confirmed)}${order.pending?' · PIX pendente: '+money(order.pending):''}</p>`:''}
       <div class="flex-actions order-tools">
-      ${can('order_transfer')?btn('Transferir','ext-transfer')+btn('Dividir','ext-split'):''}
-      ${can('order_merge')?btn('Unir','ext-merge'):''}</div>
-      ${can('operate')?btn('Cancelar comanda','cancel-order',{cls:'text-btn danger full'}):''}
-    </div></section>`;
+        ${can('order_transfer')?btn('Transferir','ext-transfer')+btn('Dividir','ext-split'):''}
+        ${can('order_merge')?btn('Unir','ext-merge'):''}
+        ${can('operate')?btn('Cancelar comanda','cancel-order',{cls:'text-btn danger'}):''}
+      </div>
+    </div>
+    <footer class="order-summary">
+      <div class="sum-total"><div><span>${amount.label}</span>
+        ${order.confirmed?`<small>Total · ${money(order.total)}</small>`:''}
+        ${order.pending?`<small>PIX pendente · ${money(order.pending)}</small>`:''}
+      </div><strong>${money(amount.value)}</strong></div>
+      ${can('checkout')?paymentButton(state,'full'):''}
+    </footer></section>`;
 }
 export function pos(state) {
   const categories=[...new Set(state.products.filter(product=>product.active).map(product=>product.category))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
-  return `${header('Atendimento','Selecione os produtos e acompanhe a comanda.',btn('Ler QR Code','navigate',{ico:'scan',cls:'primary',attrs:'data-view="scanner"'})+
+  const favorites=state.local.posCategory==='@favorites';
+  return `${header('Atendimento','',btn('Ler QR Code','navigate',{ico:'scan',cls:'primary',attrs:'data-view="scanner"'})+
       (permissionsFor(state,'scan_number')?btn('Número do cartão','ext-manual',{ico:'ticket'}):''),'pos-heading')}
     <div id="open-orders-region">${openOrderNavigation(state)}</div>
     <div id="camera-dock" class="camera-dock" hidden><div class="dock-video"></div><div><strong>Leitura contínua ativa</strong><small>Aponte para outro cartão.</small></div>${iconBtn('Desligar câmera','camera-stop','x')}</div>
     <div id="mobile-pos-navigation" class="mobile-pos-navigation">${mobilePosNavigation(state)}</div>
-    <div id="pos-add-feedback" class="pos-add-feedback" role="status" aria-live="polite" aria-atomic="true">${h(state.local.posFeedback || 'Toque em um produto para adicionar à comanda.')}</div>
+    <div id="pos-add-feedback" class="pos-add-feedback" role="status" aria-live="polite" aria-atomic="true">${h(state.local.posFeedback || '')}</div>
     <div id="pos-workspace" class="pos-layout" data-mobile-panel="${posMobilePanel(state)}"><section id="catalog-panel" class="catalog-panel" aria-labelledby="catalog-heading">
       <div class="catalog-title"><h2 id="catalog-heading" tabindex="-1">Produtos</h2><span>${num(state.products.filter(p=>p.active).length)} produtos ativos</span></div>
-      ${search('pos-search',state.local.posSearch,'Buscar por nome, código ou código de barras')}
-      <div class="categories">${[['','Todas'],['@favorites','★ Favoritos'],...categories.map(key=>[key,key])].map(([key,name])=>
-        btn(name,'category',{cls:state.local.posCategory===key?'chosen':'',attrs:`data-category="${h(key)}"`})
+      <div class="catalog-search">${search('pos-search',state.local.posSearch,'Buscar nome ou código')}
+        ${btn('Favoritos','category',{ico:'star',cls:`catalog-favorites${favorites?' chosen':''}`,attrs:`data-category="@favorites" aria-pressed="${favorites}" aria-label="Favoritos" title="Favoritos"`})}
+      </div>
+      <div class="categories" role="group" aria-label="Categorias de produtos">${[['','Todas'],...categories.map(key=>[key,key])].map(([key,name])=>
+        btn(name,'category',{cls:state.local.posCategory===key?'chosen':'',attrs:`data-category="${h(key)}" aria-pressed="${state.local.posCategory===key}"`})
       ).join('')}</div><div id="product-grid">${productGrid(state)}</div></section>
     <div id="order-panel" tabindex="-1" aria-label="Comanda selecionada">${orderPanel(state)}</div></div><div id="mobile-checkout">${mobileCheckout(state)}</div>`;
 }
@@ -341,9 +367,15 @@ export function mobileCheckout(state) {
   const order=state.card?.order;
   if (!order) return '';
   const catalog=posMobilePanel(state)==='catalog';
-  const units=order.items.reduce((sum,row)=>sum+row.quantity,0);
-  return `<div class="mobile-checkout-bar"><div><small>Comanda #${cardNumber(state.card.number)} · ${num(units)} itens</small><strong>${money(order.total)}</strong></div>
-  ${btn(catalog?'Ver comanda':'Adicionar produtos','pos-panel',{ico:catalog?'cart':'plus',cls:'primary',attrs:`data-panel="${catalog?'order':'catalog'}"`})}</div>`;
+  const amount=paymentAmount(order);
+  return `<div class="mobile-checkout-bar"><div>
+    <small>Comanda #${cardNumber(state.card.number)}</small><span>${amount.label}</span>
+    <strong>${money(amount.value)}</strong>
+    ${!catalog && order.confirmed?`<small>Total · ${money(order.total)}</small>`:''}
+    ${!catalog && order.pending?`<small>PIX pendente · ${money(order.pending)}</small>`:''}</div>
+    ${!catalog && permissionsFor(state,'checkout')?paymentButton(state,''):
+      btn(catalog?'Ver comanda':'Adicionar produtos','pos-panel',{ico:catalog?'cart':'plus',cls:'primary',attrs:`data-panel="${catalog?'order':'catalog'}"`})}
+    </div>`;
 }
 export function orderTabs(state) {
   const cards=new Map((state.openCards?.cards || []).map(card=>[card.id,{...card,order:{id:card.order_id}}]));
@@ -354,43 +386,60 @@ export function orderTabs(state) {
     const status=card.order?(current?'Em atendimento':'Em aberto'):'Disponível';
     return `<div class="order-tab${card.order?' is-open':''}${current?' current':''}">
       <button type="button" class="btn order-tab-select" data-action="switch-card" ${ID(card.id)} ${current?'aria-current="true"':''}>
-        ${icon('ticket',19)}<span><strong>#${number}</strong><small>${status}</small></span>
+        <span><strong>#${number}</strong><small>${status}</small></span>${current?`<span class="order-tab-check">${icon('check',15)}</span>`:''}
       </button>${iconBtn(`Ocultar cartão #${number} da fila`,'hide-card','x',ID(card.id))}</div>`;
   }).join('');
 }
 export function openOrderNavigation(state) {
   const open=state.openCards;
-  return `<div class="open-orders-heading"><strong>Comandas abertas na loja: <span data-open-order-count>${open?.total==null?'—':num(open.total)}</span></strong><small>Selecione um cartão para atender.</small></div>
-    <div id="order-tabs" class="order-tabs">${orderTabs(state)}</div>
-    ${open?.total>0 && !open.cards.length?'<p class="open-orders-note">Leia o QR de uma comanda ou vincule este celular ao caixa para acompanhá-la aqui.</p>':''}`;
+  return `<section class="panel open-orders" aria-labelledby="open-orders-heading">
+    <h2 id="open-orders-heading" class="open-orders-heading">Comandas abertas na loja: <span data-open-order-count>${open?.total==null?'—':num(open.total)}</span></h2>
+    <div id="order-tabs" class="order-tabs" role="group" aria-label="Cartões neste dispositivo">${orderTabs(state)}</div>
+    ${open?.total>0 && !open.cards.length?'<p class="open-orders-note">Leia o QR de uma comanda ou vincule este celular ao caixa para acompanhá-la aqui.</p>':''}
+    </section>`;
 }
 
 export function scannerView(state) {
   const paired=state.pairing.reader;
-  return `${header('Leitor de QR','Aponte a câmera para o QR do cartão físico.',btn('Voltar ao atendimento','navigate',{ico:'cart',attrs:'data-view="pos"'})+
-    (permissionsFor(state,'scan_number')?btn('Número do cartão','ext-manual',{ico:'ticket'}):''))}
+  return `${header('Leitor de QR','',btn('Voltar ao atendimento','navigate',{ico:'cart',attrs:'data-view="pos"'})+
+    (permissionsFor(state,'scan_number')?btn('Número do cartão','ext-manual',{ico:'ticket'}):''),'scanner-heading')}
     <div class="scanner-layout">
-      <section class="panel scanner-panel"><div class="panel-heading"><div><h2>Câmera</h2><p>Leitura contínua de cartões</p></div><span id="camera-badge">${badge('neutral','Desligada')}</span></div>
+      <section class="panel scanner-panel" aria-labelledby="scanner-camera-title">
+        <header class="panel-heading scanner-camera-heading">
+          <div class="scanner-camera-title"><h2 id="scanner-camera-title">Câmera</h2><span id="camera-badge">${badge('neutral','Desligada')}</span></div>
+          <div class="scanner-camera-actions">
+            ${btn('Ativar câmera','camera-start',{ico:'camera',cls:'primary',attrs:'id="camera-start"'})}
+            ${btn('Desligar câmera','camera-stop',{ico:'x',attrs:'id="camera-stop" hidden'})}
+          </div>
+        </header>
         <div id="camera-stage" class="camera-stage"><video id="camera-video" playsinline muted aria-label="Imagem da câmera"></video><div class="camera-overlay" aria-hidden="true"><div></div></div>
-          <div id="camera-placeholder" class="camera-placeholder">${icon('scan',43)}<p>Enquadre o QR Code aqui</p></div>
+          <div id="camera-placeholder" class="camera-placeholder"><span>${icon('scan',35)}</span><p>Enquadre aqui o QR do cartão</p></div>
         </div>
-        <div id="scan-status" class="scan-status" role="status">${icon('camera',19)} Ative a câmera para começar.</div>
-        <div class="camera-controls">
-          ${btn('Ativar câmera','camera-start',{ico:'camera',cls:'primary',attrs:'id="camera-start"'})}
-          ${btn('Desligar câmera','camera-stop',{ico:'x',attrs:'id="camera-stop" hidden'})}
-          ${btn('Lanterna','camera-flash',{ico:'flash',attrs:'id="camera-flash" hidden aria-pressed="false"'})}
+        <div id="scan-status" class="scan-status" role="status"></div>
+        <div class="camera-tools">
           ${lab('Selecionar câmera',select('camera',[],null,'Câmera padrão','id="camera-select" disabled'))}
+          ${btn('Lanterna','camera-flash',{ico:'flash',attrs:'id="camera-flash" hidden aria-pressed="false"'})}
         </div>
       </section>
       <aside class="scanner-options">
-        ${panel('Destino da leitura','Escolha onde a comanda será aberta.',`<div class="scanner-settings">
-          <label class="radio-tile"><input type="radio" name="scan-mode" value="direct" ${state.scanMode==='direct'?'checked':''}><span>${icon('camera')}<strong>Neste dispositivo</strong><small>Leia o cartão e adicione produtos à comanda neste celular.</small></span></label>
-          <label class="radio-tile"><input type="radio" name="scan-mode" value="paired" ${state.scanMode==='paired'?'checked':''} ${paired?'':'disabled'}><span>${icon('terminal')}<strong>No caixa e neste celular</strong><small id="paired-label">${paired?`${h(paired.name)} · ${paired.online?'Online':'Indisponível'}`:'Vincule o celular ao caixa.'}</small><small>A mesma comanda pode ser acompanhada e atendida nos dois dispositivos.</small></span></label>
-          <div class="flex-actions">${btn(paired?'Trocar caixa':'Parear com caixa','pair-reader',{ico:'link',cls:'outline'})}${paired?btn('Desvincular','unlink-reader'):''}</div>
+        ${panel('Onde abrir a comanda','',`<div class="scanner-settings">
+          <div class="scan-destinations" role="group" aria-label="Destino da leitura">
+            <label class="radio-tile"><input type="radio" name="scan-mode" value="direct" ${state.scanMode==='direct'?'checked':''}><span>${icon('camera')}<strong>Neste dispositivo</strong><small>Atenda por aqui após ler o cartão.</small></span></label>
+            <label class="radio-tile"><input type="radio" name="scan-mode" value="paired" ${state.scanMode==='paired'?'checked':''} ${paired?'':'disabled'}><span>${icon('terminal')}<strong>No caixa e neste celular</strong><small id="paired-label">${paired?`${h(paired.name)} · ${paired.online?'Online':'Indisponível'}`:'Vincule o celular ao caixa.'}</small></span></label>
+          </div>
+          <div class="scanner-pair">
+            <h3>Vincular celular ao caixa</h3>
+            <p>Gere o código no computador e insira no celular.</p>
+            <div class="scanner-pair-actions">
+              ${btn('Gerar código no caixa','terminal',{ico:'terminal'})}
+              ${btn(paired?'Trocar caixa':'Inserir código','pair-reader',{ico:'link',cls:'outline'})}
+              ${paired?btn('Desvincular','unlink-reader',{cls:'text-btn'}):''}
+            </div>
+          </div>
           <label class="toggle-row"><input id="vibrate" type="checkbox" ${state.vibrate?'checked':''}> Vibrar após a leitura</label>
         </div>`)}
-        ${panel('Leitor externo','Use quando o leitor envia o QR como teclado.',`<form class="scanner-settings" data-form="external-scan">
-          ${lab('Código do cartão',input('code','','data-verbatim placeholder="Aponte o leitor ou cole o código" autocomplete="off" required maxlength="80"'))}<button class="btn outline" type="submit">${icon('scan',19)} Ler código</button><div class="form-error" role="alert" hidden></div></form>`)}
+        ${panel('Leitor externo','',`<form class="scanner-settings scanner-external" data-form="external-scan">
+          ${lab('Código do cartão',input('code','','data-verbatim placeholder="Use o leitor ou cole o código" autocomplete="off" required maxlength="80"'))}<button class="btn outline" type="submit">${icon('scan',19)} Ler código</button><div class="form-error" role="alert" hidden></div></form>`)}
       </aside></div>`;
 }
 

@@ -132,12 +132,13 @@ export function cardsForm() {
 }
 export function terminalForm(pairing,code=null) {
   return form('terminal',lab('Nome do caixa',input('name',code?.name || 'Caixa 1','required maxlength="60" minlength="2" autofocus'),'span-two')+
-    `<p class="dialog-note span-two">No celular, abra o leitor e informe o código. Ele dura dois minutos e pode ser usado uma vez.</p>
+    `<p class="dialog-note span-two">No celular, abra Leitor de QR e toque em Inserir código. O código dura dois minutos e pode ser usado uma vez.</p>
     ${code?`<div class="pair-code span-two"><span>Código de pareamento</span><strong>${h(code.code)}</strong><small id="pair-expiry"></small></div>`:''}
     ${pairing.readers.length?`<div class="span-two active-readers"><strong>Leitores vinculados</strong><p>${pairing.readers.map(row=>`${h(row.name)} (${row.count})`).join(' · ')}</p>${btn('Desvincular todos','revoke-readers',{ico:'x'})}</div>`:''}`,submit(code?'Gerar outro código':'Gerar código'));
 }
 export function readerForm() {
-  return form('pair-reader',lab('Código do caixa',input('code','','required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autofocus'),'span-two'),submit('Vincular celular'));
+  return form('pair-reader',`<p class="dialog-note span-two">Digite os seis números exibidos no caixa.</p>`+
+    lab('Código do caixa',input('code','','required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autofocus'),'span-two'),submit('Vincular celular'));
 }
 export function pickerRows(state,term) {
   const key=normalize(term);

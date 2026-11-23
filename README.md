@@ -21,6 +21,12 @@ O IP da rede local é identificado automaticamente. Os endereços ficam em `data
 
 Também é possível iniciar os dois serviços pelo terminal com `npm run iniciar`. O atalho apenas inicia os serviços quando aberto; ele não configura inicialização automática com o Windows.
 
+### Iniciar com dois cliques no macOS
+
+Depois de instalar as dependências com `npm ci`, dê dois cliques em [Iniciar Last Place PDV.command](Iniciar%20Last%20Place%20PDV.command) pelo Finder. Mantenha o arquivo na raiz do projeto. Ele inicia o servidor do computador e o acesso HTTPS do celular em segundo plano e abre o PDV no navegador padrão quando os dois estiverem disponíveis. Se já estiverem rodando, ele reutiliza os serviços.
+
+O Terminal mostra os endereços do PDV. Você pode fechar a janela depois que o navegador abrir. Se o arquivo perder a permissão de execução ao ser copiado, execute `chmod +x "Iniciar Last Place PDV.command"` na pasta do projeto.
+
 ### Configuração inicial
 
 1. Abra `http://localhost:3000` no computador do servidor. Crie o primeiro administrador com uma senha de pelo menos dez caracteres. A criação inicial só está disponível no próprio servidor, usando localhost.
@@ -54,7 +60,7 @@ Transfira `data/https/balcao-ca.cer` do computador para o celular. Esse é o cer
 - **iPhone** — Abra o arquivo recebido por AirDrop e instale o perfil em **Ajustes**. Depois ative a confiança em **Ajustes → Geral → Sobre → Ajustes de Confiança de Certificado**. [Suporte da Apple](https://support.apple.com/pt-br/102390)
 - **Android** — Abra **Instalar certificado** nos ajustes de segurança, escolha **Certificado CA** e selecione o arquivo recebido. Os nomes dos menus variam conforme o aparelho.
 
-No celular, abra o endereço HTTPS exibido no terminal e faça login. Para atender diretamente no celular, selecione **Neste dispositivo** e leia o cartão. Para enviar leituras ao caixa, gere um código em **Parear caixa** no computador e informe-o em **Leitor de QR → Parear com caixa** no celular.
+No celular, abra o endereço HTTPS exibido no terminal e faça login. Para atender diretamente no celular, selecione **Neste dispositivo** e leia o cartão. Para enviar leituras ao caixa, abra **Leitor de QR → Gerar código no caixa** no computador. No celular, abra **Leitor de QR → Inserir código** e informe os seis dígitos.
 
 ### Servidor HTTPS direto
 
@@ -80,7 +86,7 @@ Se a loja já tiver um proxy HTTPS, mantenha o Node acessível apenas na interfa
 - No celular, use **Produtos** para pesquisar, filtrar por categoria e tocar nos itens que deseja adicionar. Use **Comanda** ou **Ver comanda**, na barra inferior, para conferir os itens e alterar quantidades. O número do cartão, a quantidade de itens e o total ficam visíveis durante o atendimento. A confirmação de inclusão informa a comanda que recebeu o produto. Operadores com permissão de atendimento podem adicionar produtos mesmo sem permissão para receber pagamentos.
 - **Comandas abertas na loja** mostra o total atual do servidor. **Comanda (N itens)** indica a quantidade de produtos da comanda selecionada, não o número de comandas da loja. As comandas lidas pelo operador ou pelo dispositivo pareado aparecem como cartões para seleção. Ao abrir uma nova aba ou recarregar, o celular recupera as comandas abertas acessíveis no servidor, inclusive as anteriores ao pareamento. Esse compartilhamento depende de um vínculo e de uma sessão válidos; desvincular revoga o acesso herdado, preservando as leituras próprias de QR.
 - A tela se adapta de 320 px até tablets e desktops: celulares usam duas colunas de produtos e alternam entre catálogo e comanda; telas maiores mostram os dois painéis lado a lado. Há espaço para as áreas seguras da tela, botões para toque e campos que mantêm o tamanho legível ao abrir o teclado. Se a conexão cair, as inclusões ficam bloqueadas até a reconexão automática, sem reenviar alterações pendentes. Ao voltar ao navegador ou recarregar a página na mesma sessão, a comanda é consultada novamente no servidor.
-- Para parear, abra **Parear caixa** no computador que vai receber as leituras. Informe o nome do caixa e gere um código. No celular, abra **Leitor de QR**, toque em **Parear com caixa** e informe os seis dígitos em até dois minutos. Cada código dá direito a um vínculo. Mantenha o caixa online. No modo **No caixa e neste celular**, a leitura abre o mesmo cartão nos dois dispositivos. A abertura e as alterações da comanda são sincronizadas, e o celular também pode adicionar produtos conforme as permissões do operador. Use sessões distintas no caixa e no celular.
+- Para parear, abra **Parear caixa** no menu ou **Gerar código no caixa** no leitor do computador que vai receber as leituras. Informe o nome do caixa e gere um código. No celular, abra **Leitor de QR**, toque em **Inserir código** e informe os seis dígitos em até dois minutos. Cada código dá direito a um vínculo. Mantenha o caixa online. No modo **No caixa e neste celular**, a leitura abre o mesmo cartão nos dois dispositivos. A abertura e as alterações da comanda são sincronizadas, e o celular também pode adicionar produtos conforme as permissões do operador. Use sessões distintas no caixa e no celular.
 - Para usar um leitor externo que emula teclado, foque o campo **Código do cartão** em **Leitor externo**. Configure o leitor para enviar Enter após a leitura.
 - Ao bloquear ou trocar o operador, as comandas abertas continuam no servidor. Leia novamente os cartões para retomá-las. O histórico do próprio turno corresponde aos atendimentos encerrados no turno mais recente do operador. Vendas antigas sem turno usam a sessão registrada. Cancelamentos sem turno comprovado usam o operador registrado. O pareamento encerra ao sair da sessão do caixa ou do leitor. O administrador também pode revogar o vínculo pelo caixa.
 

@@ -1,5 +1,6 @@
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
+const {randomUUID}=require('node:crypto');
 const {once}=require('node:events');
 const {existsSync,mkdirSync,writeFileSync}=require('node:fs');
 const {join,resolve}=require('node:path');
@@ -76,6 +77,15 @@ async function checkLayout(page,label) {
   assert.ok(buttons.every(box=>box.width>=44 && box.height>=44),label+': controles pequenos para toque');
 }
 
+async function checkSidebar(page) {
+  const labels=await page.locator('.sidebar .navigation>span').evaluateAll(nodes=>nodes
+    .filter(node=>node.scrollWidth>node.clientWidth+1 || getComputedStyle(node).whiteSpace!=='nowrap')
+    .map(node=>node.textContent));
+  assert.deepEqual(labels,[],'Opções da barra lateral quebradas ou cortadas');
+  const colors=await page.locator('.sidebar .nav-label').evaluateAll(nodes=>nodes.map(node=>getComputedStyle(node).color));
+  assert.deepEqual(colors,Array(3).fill('rgb(255, 205, 146)'),'Os três títulos do menu devem usar o âmbar de Administração.');
+}
+
 async function scan(page,code,mode='direct') {
   await page.getByRole('button',{name:'Ler QR Code',exact:true}).click();
   await page.locator(`input[name="scan-mode"][value="${mode}"]`).check();
@@ -90,7 +100,7 @@ async function scan(page,code,mode='direct') {
   let browser;
   const checks=[],pageErrors=[];
   try {
-    browser=await chromium.launch({executablePath,headless:true});
+    browser=await chromium.launch({executablePath,headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
     const desktop=await browser.newContext({viewport:{width:1366,height:900},locale:'pt-BR'});
     await api(desktop,server.url,'setup',{username:'admin',name:'Administrador de teste',password:'teste-mobile-admin'});
     await api(desktop,server.url,'users',{username:'atendente',name:'Atendente de teste',password:'teste-mobile-operador',role:'operator',permissions:{checkout:false}});
@@ -204,17 +214,48 @@ async function scan(page,code,mode='direct') {
     checks.push('Troca de cartão mantém os produtos separados em cada comanda.');
     await till.setViewportSize({width:320,height:568});
     await checkLayout(till,'administrador no celular');
+    await till.getByRole('button',{name:'Abrir menu',exact:true}).click();
+    await checkSidebar(till);
+    await till.locator('#nav-backdrop').click({position:{x:308,y:80}});
     await till.locator('#mobile-pos-navigation [data-panel="order"]').click();
-    await till.getByRole('button',{name:'Receber pagamento',exact:true}).click();
+    const mobilePayment=till.locator('.mobile-checkout-bar').getByRole('button',{name:'Receber pagamento',exact:true});
+    assert.equal(await till.getByRole('button',{name:'Receber pagamento',exact:true}).count(),1);
+    await mobilePayment.click();
     await till.locator('dialog[open]').waitFor();
     const dialog=await till.locator('dialog[open]').boundingBox();
     assert.ok(dialog.x>=0 && dialog.width<=320,'Diálogo deve caber no celular');
     assert.ok(await till.locator('dialog input:not([type="hidden"])').evaluateAll(fields=>fields.every(field=>parseFloat(getComputedStyle(field).fontSize)>=16)),'Campos pequenos podem causar zoom automático no celular');
     checks.push('Administrador, atalhos adicionais e diálogo de pagamento em 320 px.');
     await till.getByRole('button',{name:'Voltar',exact:true}).click();
-    const pairing=await api(desktop,server.url,'pairing/code',{name:'Caixa de teste'});
-    await api(mobile,server.url,'pairing/link',{code:pairing.code});
-    await scan(phone,code3,'paired');
+    await till.getByRole('button',{name:'Ler QR Code',exact:true}).click();
+    await till.locator('#camera-stage').waitFor();
+    await checkLayout(till,'leitor em 320 px');
+    await till.setViewportSize({width:1024,height:768});
+    await checkLayout(till,'leitor em 1024 px');
+    await checkSidebar(till);
+    checks.push('Menu completo cabe em uma linha por opção no celular e no caixa, com os três títulos em âmbar.');
+    await till.getByRole('button',{name:'Ativar câmera',exact:true}).click();
+    await till.locator('#camera-stage.active').waitFor();
+    assert.ok(await till.locator('#camera-video').evaluate(video=>video.videoWidth>0));
+    await till.getByRole('button',{name:'Desligar câmera',exact:true}).click();
+    await till.getByRole('button',{name:'Ativar câmera',exact:true}).waitFor();
+    await till.screenshot({path:join(output,'caixa-leitor.png')});
+    await till.getByRole('button',{name:'Gerar código no caixa',exact:true}).click();
+    await till.getByLabel('Nome do caixa',{exact:true}).fill('Caixa de teste');
+    await till.getByRole('button',{name:'Gerar código',exact:true}).click();
+    await till.locator('.pair-code strong').waitFor();
+    const code=await till.locator('.pair-code strong').textContent();
+    assert.match(code,/^\d{6}$/);
+    await till.getByRole('button',{name:'Voltar',exact:true}).click();
+    await till.getByRole('button',{name:'Voltar ao atendimento',exact:true}).click();
+    await phone.getByRole('button',{name:'Ler QR Code',exact:true}).click();
+    await phone.getByRole('button',{name:'Inserir código',exact:true}).click();
+    await phone.getByLabel('Código do caixa',{exact:true}).fill(code);
+    await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
+    await waitFor(()=>phone.locator('input[name="scan-mode"][value="paired"]').isChecked(),'pareamento pelo leitor de QR');
+    checks.push('O leitor inicia e desliga a câmera simulada e permite gerar e inserir o código de pareamento pela interface.');
+    await phone.getByLabel('Código do cartão',{exact:true}).fill('pdv:'+code3);
+    await phone.getByRole('button',{name:'Ler código',exact:true}).click();
     await waitFor(async()=>/Cartão #043/.test(await till.locator('#order-panel').textContent()),'cartão enviado ao caixa');
     await till.getByRole('button',{name:'Iniciar atendimento',exact:true}).click();
     await waitFor(async()=>/Comanda #043/.test(await phone.locator('.mobile-pos-context').textContent()),'comanda do caixa também no celular pareado');
@@ -247,6 +288,41 @@ async function scan(page,code,mode='direct') {
     assert.equal(await recovered.locator('[data-action="switch-card"][data-id="3"]').count(),0);
     assert.equal(await recovered.locator('[data-open-order-count]').textContent(),'3');
     checks.push('Ocultar um cartão continua sendo uma preferência local e não muda o total de comandas da loja.');
+
+    await till.setViewportSize({width:1366,height:768});
+    await api(desktop,server.url,'cash/open',{register:1,opening:0,request_id:randomUUID()});
+    const order=(await api(desktop,server.url,'cards/3')).order;
+    for (let number=1;number<=12;number++) {
+      const item=await api(desktop,server.url,'products',{code:'AC'+number,name:'Acessório '+number,category:'Acessórios',stock:5,price:250,cost:100,minimum:0});
+      await api(desktop,server.url,`orders/${order.id}/items`,{product:item.id,action:'delta',delta:1});
+    }
+    const updated=(await api(desktop,server.url,'cards/3')).order;
+    await api(desktop,server.url,`orders/${order.id}/payments`,{version:updated.version,request_id:randomUUID(),payments:[{method:'debit',amount:500},{method:'pix',amount:200}]});
+    const content=till.locator('#order-panel .order-content');
+    const summary=till.locator('#order-panel .order-summary');
+    await summary.getByText('Falta receber',{exact:true}).waitFor();
+    assert.match(await summary.textContent(),/R\$\s*32,50/);
+    assert.match(await summary.textContent(),/Total · R\$\s*37,50/);
+    assert.match(await summary.textContent(),/PIX pendente · R\$\s*2,00/);
+    const selection=till.locator('#order-tabs [aria-current="true"]');
+    assert.match(await selection.textContent(),/#043\s*Em atendimento/);
+    assert.equal(await selection.locator('.order-tab-check').isVisible(),true);
+    await till.evaluate(()=>window.scrollTo(0,0));
+    const desktopPayment=summary.getByRole('button',{name:'Receber pagamento',exact:true});
+    assert.ok(await desktopPayment.evaluate(button=>button.getBoundingClientRect().bottom<=innerHeight));
+    assert.ok(await content.evaluate(node=>node.scrollHeight>node.clientHeight));
+    await content.evaluate(node=>{node.scrollTop=node.scrollHeight;});
+    assert.ok(await desktopPayment.evaluate(button=>button.getBoundingClientRect().bottom<=innerHeight));
+    await content.evaluate(node=>{node.scrollTop=0;});
+    await till.screenshot({path:join(output,'caixa-atendimento-claro.png')});
+    const lightPaymentColor=await desktopPayment.evaluate(node=>getComputedStyle(node).backgroundColor);
+    await till.locator('[data-action="toggle-theme"]').click();
+    assert.equal(await till.locator('html').getAttribute('data-theme'),'dark');
+    await desktopPayment.evaluate(node=>Promise.all(node.getAnimations().map(animation=>animation.finished)));
+    assert.notEqual(await desktopPayment.evaluate(node=>getComputedStyle(node).backgroundColor),lightPaymentColor);
+    assert.ok(await desktopPayment.evaluate(button=>button.getBoundingClientRect().bottom<=innerHeight));
+    await till.screenshot({path:join(output,'caixa-atendimento-escuro.png')});
+    checks.push('Comanda ativa identificada nos dois temas e saldo, total, PIX e pagamento acessíveis com uma lista longa.');
     assert.deepEqual(pageErrors,[],'Erros de JavaScript no navegador');
     writeFileSync(join(output,'resultado.json'),JSON.stringify({checks,pageErrors},null,2));
     for (const check of checks) console.log('OK '+check);

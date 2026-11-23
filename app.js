@@ -82,7 +82,7 @@ function online(value) {
   const banner=$('#connection-banner');
   if (banner) banner.hidden=value;
   document.querySelectorAll('[data-action="payment"]').forEach(button=>{
-    button.disabled=!value || !state.card?.order?.items.length;
+    button.disabled=views.paymentDisabled(state);
   });
   if (!value && state.me && state.view==='scanner') scanner.status('Sem conexão com o servidor. Aguarde a reconexão.','error');
   if (changed && state.view==='pos') renderPos();
@@ -358,12 +358,16 @@ function renderPage() {
   const main=$('#main');
   if (!main || !state.view) return;
   const focus=focusBefore();
+  const posScroll=state.view==='pos'?posScrollBefore():null;
   const expanded=[...main.querySelectorAll('.report-details[open] summary')].map(node=>node.textContent);
   main.innerHTML=pages[state.view](state);
   for (const node of main.querySelectorAll('.report-details summary')) {
     if (expanded.includes(node.textContent)) node.parentElement.open=true;
   }
-  if (state.view==='pos') scanner.mountDock();
+  if (posScroll) {
+    scanner.mountDock();
+    restorePosScroll(posScroll);
+  }
   if (state.view==='scanner') scanner.restore();
   focusAfter(focus);
   updatePayment();
@@ -445,16 +449,41 @@ async function refresh() {
   if (['history','audit'].includes(view) && document.activeElement?.closest('.filter-strip')) return;
   renderPage();
 }
+function posScrollBefore() {
+  const tabs=$('#order-tabs');
+  return {
+    card:tabs?.querySelector('[aria-current="true"]')?.dataset.id,
+    tabs:tabs?.scrollLeft || 0,
+    catalog:$('#product-grid')?.scrollTop || 0,
+    order:$('#order-panel .order-content')?.scrollTop || 0
+  };
+}
+function restorePosScroll(previous) {
+  const tabs=$('#order-tabs');
+  const selected=tabs.querySelector('[aria-current="true"]');
+  tabs.scrollLeft=previous.tabs;
+  $('#product-grid').scrollTop=previous.catalog;
+  if (selected?.dataset.id===previous.card) {
+    const content=$('#order-panel .order-content');
+    if (content) content.scrollTop=previous.order;
+  } else if (selected) {
+    const card=selected.parentElement.getBoundingClientRect();
+    const rail=tabs.getBoundingClientRect();
+    tabs.scrollLeft+=Math.min(0,card.left-rail.left)+Math.max(0,card.right-rail.right);
+  }
+}
 function renderPos() {
   if (state.view!=='pos') return;
   const order=$('#order-panel');
   const focus=focusBefore();
   if (order) {
+    const scroll=posScrollBefore();
     order.innerHTML=views.orderPanel(state);
     $('#open-orders-region').innerHTML=views.openOrderNavigation(state);
     $('#mobile-checkout').innerHTML=views.mobileCheckout(state);
     $('#product-grid').innerHTML=views.productGrid(state);
     syncPosNavigation();
+    restorePosScroll(scroll);
     focusAfter(focus);
   }
   updatePayment();
@@ -465,7 +494,7 @@ function syncPosNavigation() {
   workspace.dataset.mobilePanel=views.posMobilePanel(state);
   $('#mobile-pos-navigation').innerHTML=views.mobilePosNavigation(state);
   const feedback=$('#pos-add-feedback');
-  feedback.textContent=state.local.posFeedback || 'Toque em um produto para adicionar à comanda.';
+  feedback.textContent=state.local.posFeedback || '';
   feedback.title=feedback.textContent;
 }
 function setCard(card,activate=true) {
@@ -702,8 +731,12 @@ async function actions(action,element) {
     case 'camera-flash': return scanner.flash();
     case 'category':
       state.local.posCategory=element.dataset.category;
-      document.querySelectorAll('[data-action="category"]').forEach(button=>button.classList.toggle('chosen',button===element));
+      document.querySelectorAll('[data-action="category"]').forEach(button=>{
+        button.classList.toggle('chosen',button===element);
+        button.setAttribute('aria-pressed',String(button===element));
+      });
       $('#product-grid').innerHTML=views.productGrid(state);
+      $('#product-grid').scrollTop=0;
       return;
     case 'switch-card': return receiveCard(id);
     case 'pos-panel':
@@ -1128,6 +1161,7 @@ document.addEventListener('input',event=>{
   if (field.id==='pos-search') {
     state.local.posSearch=field.value;
     $('#product-grid').innerHTML=views.productGrid(state);
+    $('#product-grid').scrollTop=0;
   } else if (field.id==='insight-search') {
     state.local.insightSearch=field.value;
     state.local.insightPage=1;
