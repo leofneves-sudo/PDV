@@ -113,6 +113,13 @@ export function input(name,value='',attrs='') {
   const upper=['text','search'].includes(type) && !/(?:^|\s)(?:data-verbatim|data-money|inputmode="numeric")(?:\s|$)/.test(attrs);
   return `<input name="${name}" value="${h(value)}" ${upper?uppercaseAttrs+' ':''}${attrs}>`;
 }
+let passwordFieldCount=0;
+export function passwordField(label,name,attrs='',cls='') {
+  const id='pdv-password-'+(++passwordFieldCount);
+  return `<div class="field ${h(cls)}"><label for="${id}">${h(label)}</label><div class="password-input">${
+    input(name,'',`type="password" id="${id}" data-password data-verbatim autocapitalize="off" autocorrect="off" spellcheck="false" ${attrs}`)}${
+    btn('Ver senha','toggle-password',{cls:'outline password-toggle',attrs:`aria-controls="${id}" aria-pressed="false"`})}</div></div>`;
+}
 export function moneyInput(name,value=null,attrs='') {
   return `<span class="money-input"><span class="money-symbol" aria-hidden="true">R$</span>${
     input(name,decimal(value),'data-money inputmode="decimal" placeholder="0,00" '+attrs)}</span>`;

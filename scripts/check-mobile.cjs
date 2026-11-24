@@ -128,11 +128,18 @@ async function scan(page,code,mode=null) {
     await phone.getByLabel('Senha',{exact:true}).fill('teste-mobile-operador');
     await phone.getByRole('button',{name:'Entrar',exact:true}).click();
     await phone.locator('#pairing-required').waitFor();
+    await till.getByRole('button',{name:'Parear caixa',exact:true}).click();
+    await till.getByLabel('Nome do caixa',{exact:true}).fill('Caixa inicial');
+    await till.getByRole('button',{name:'Gerar código',exact:true}).click();
+    await till.locator('.pair-code strong').waitFor();
+    const initialPair={code:await till.locator('.pair-code strong').textContent()};
     assert.equal(await phone.locator('#pos-workspace,.navigation').count(),0);
     assert.equal((await mobile.request.get(server.url+'/api/products')).status(),428);
     await phone.getByLabel('Código do caixa',{exact:true}).fill('000000');
     await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
     await phone.locator('.form-error:visible').waitFor();
+    assert.equal(await till.locator('#modal[open] .pair-code').count(),1);
+    assert.equal(await till.getByText('Celular vinculado com sucesso.',{exact:true}).count(),0);
     await phone.reload();
     await phone.locator('#pairing-required').waitFor();
     for (const width of [320,390]) {
@@ -142,10 +149,13 @@ async function scan(page,code,mode=null) {
     }
     await phone.screenshot({path:join(output,'celular-vinculo-obrigatorio.png')});
     checks.push('Celular sem vínculo fica bloqueado, inclusive pela API e após recarregar; código inválido não libera o acesso e a tela cabe em 320 px.');
-    const initialPair=await api(desktop,server.url,'pairing/code',{name:'Caixa inicial'});
     await phone.getByLabel('Código do caixa',{exact:true}).fill(initialPair.code);
     await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
     await phone.locator('#pos-workspace').waitFor();
+    await till.locator('#modal').waitFor({state:'hidden'});
+    await till.getByText('Celular vinculado com sucesso.',{exact:true}).waitFor();
+    await till.screenshot({path:join(output,'caixa-celular-vinculado.png')});
+    checks.push('Código inválido mantém a janela do PC aberta; vínculo confirmado fecha Parear caixa e mostra a confirmação antes de ler qualquer cartão.');
     await phone.reload();
     await phone.locator('#pos-workspace').waitFor();
     checks.push('Código gerado no computador libera o atendimento e o vínculo válido permanece ao recarregar o celular.');
@@ -272,8 +282,6 @@ async function scan(page,code,mode=null) {
     await till.locator('.pair-code strong').waitFor();
     const code=await till.locator('.pair-code strong').textContent();
     assert.match(code,/^\d{6}$/);
-    await till.getByRole('button',{name:'Voltar',exact:true}).click();
-    await till.getByRole('button',{name:'Voltar ao atendimento',exact:true}).click();
     await phone.getByRole('button',{name:'Ler QR Code',exact:true}).click();
     assert.equal(await phone.locator('input[name="scan-mode"][value="direct"]').count(),0);
     assert.equal(await phone.getByRole('button',{name:'Gerar código no caixa',exact:true}).count(),0);
@@ -281,6 +289,10 @@ async function scan(page,code,mode=null) {
     await phone.getByLabel('Código do caixa',{exact:true}).fill(code);
     await phone.getByRole('button',{name:'Vincular celular',exact:true}).click();
     await waitFor(()=>phone.locator('input[name="scan-mode"][value="paired"]').isChecked(),'pareamento pelo leitor de QR');
+    await till.locator('#modal').waitFor({state:'hidden'});
+    await till.getByText('Celular vinculado com sucesso.',{exact:true}).last().waitFor();
+    await till.getByRole('button',{name:'Voltar ao atendimento',exact:true}).click();
+    checks.push('Um novo vínculo do mesmo celular também confirma no PC e fecha a janela, mesmo sem aumentar a quantidade de leitores.');
     checks.push('O leitor inicia e desliga a câmera simulada e permite gerar e inserir o código de pareamento pela interface.');
     await phone.getByLabel('Código do cartão',{exact:true}).fill('pdv:'+code3);
     await phone.getByRole('button',{name:'Ler código',exact:true}).click();

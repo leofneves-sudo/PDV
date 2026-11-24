@@ -194,7 +194,7 @@ function pair(actor,body,ip) {
   if (!throttle(`pair:${actor.id}`,6,120000) || !throttle(`pair-ip:${ip}`,32,120000)) fail('Muitas tentativas. Aguarde dois minutos.',429);
   const code = required(body.code,'Código',6,6);
   if (!/^\d{6}$/.test(code)) fail('Informe os seis dígitos exibidos no caixa.');
-  return tx(() => {
+  const result=tx(() => {
     const terminal = get('SELECT * FROM terminal_codes WHERE code_hash=? AND expires>?',sha(code),Date.now());
     if (!terminal || terminal.session_id === actor.session_id ||
         !findSession(terminal.session_id) || !clients.has(terminal.session_id)) {
@@ -206,8 +206,12 @@ function pair(actor,body,ip) {
       ON CONFLICT(reader) DO UPDATE SET terminal=excluded.terminal,name=excluded.name`,
       actor.session_id,terminal.session_id,terminal.name);
     audit(actor,'leitor.pareado','caixa',null,null,{name:terminal.name});
-    return pairingInfo(actor);
+    return {terminal:terminal.session_id,info:pairingInfo(actor)};
   });
+  for (const socket of clients.get(result.terminal) || []) {
+    event(socket,'paired',{readerName:actor.name});
+  }
+  return result.info;
 }
 function scan(actor,body) {
   allow(actor,'operate');

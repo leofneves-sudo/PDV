@@ -1,4 +1,4 @@
-import {h,icon,btn,empty,lab,input,textarea,select,moneyInput,money,num,dt,cardNumber,badge,normalize} from './ui.js';
+import {h,icon,btn,empty,lab,input,passwordField,textarea,select,moneyInput,money,num,dt,cardNumber,badge,normalize} from './ui.js';
 import {permissionsFor} from './views.js';
 import {needsExpiry as productNeedsExpiry} from './expiry.mjs';
 
@@ -15,7 +15,7 @@ export const body = (content,actions='') => `<div class="dialog-body">${content}
 export function adminConfirm() {
   return `<details class="approval-fields span-two"><summary>Autorização do administrador</summary><div class="form-grid">
     ${lab('Usuário do administrador',input('approvalUser','','autocomplete="off" maxlength="40"'))}
-    ${lab('Senha do administrador',input('approvalPassword','','type="password" autocomplete="off" maxlength="128"'))}
+    ${passwordField('Senha do administrador','approvalPassword','autocomplete="off" maxlength="128"')}
   </div></details>`;
 }
 export function approvalFrom(fields) {
@@ -122,7 +122,7 @@ export function userForm(user,cfg) {
     lab('Usuário',input('username',row.username,'required minlength="3" maxlength="40" autocomplete="off"'))+
     lab('Perfil',select('role',[['operator','Operador'],['admin','Administrador']],row.role,null,'id="user-role"'))+activeField(row.active)+
     lab('Limite de desconto por comanda',moneyInput('discount_limit',row.discount_limit || 0,'required'))+
-    lab(row.id?'Nova senha (opcional)':'Senha',input('password','','type="password" autocomplete="new-password" minlength="10" maxlength="128" '+(row.id?'':'required')),'span-two')+
+    passwordField(row.id?'Nova senha (opcional)':'Senha','password','autocomplete="new-password" minlength="10" maxlength="128" '+(row.id?'':'required'),'span-two')+
     `<fieldset class="permission-grid span-two" id="permissions-field" ${row.role==='admin'?'hidden':''}><legend>Permissões do operador</legend>
     ${Object.entries(cfg.permissions).map(([key,label])=>`<label class="toggle-row"><input type="checkbox" name="allow-${key}" ${row.permissions[key]?'checked':''}>${h(label)}</label>`).join('')}</fieldset>`);
 }

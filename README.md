@@ -258,7 +258,7 @@ Depois de instalar e habilitar a confiança no certificado, abra o endereço HTT
 1. No PC, abra `http://localhost:3000` e faça login. A configuração do primeiro administrador deve ser concluída nesse computador.
 2. No celular, abra o endereço HTTPS e faça login com a conta do operador. Será exibida a tela **Vincule este celular ao caixa**.
 3. No PC, clique em **Parear caixa**, informe um nome, como **Caixa 1**, e selecione **Gerar código**. Também é possível gerar o código pela tela **Leitor de QR** do computador.
-4. No celular, digite os seis números em **Código do caixa** e toque em **Vincular celular**. Cada código vale por dois minutos e pode ser usado uma única vez. Gere um código diferente para cada celular.
+4. No celular, digite os seis números em **Código do caixa** e toque em **Vincular celular**. Quando o servidor confirmar o vínculo, o PC fecha automaticamente a janela **Parear caixa** e exibe **Celular vinculado com sucesso**. Não é necessário ler um cartão para receber essa confirmação. Cada código vale por dois minutos e pode ser usado uma única vez. Gere um código diferente para cada celular.
 5. Após liberar o acesso, abra **Leitor de QR → Ativar câmera**, autorize a câmera quando solicitado e leia o cartão. A leitura fica no modo **No caixa e neste celular**.
 6. Para um cartão livre, toque em **Iniciar atendimento**. Use **Produtos** para adicionar itens e **Comanda** para conferir as quantidades e o total. As alterações são compartilhadas com o PC conectado.
 

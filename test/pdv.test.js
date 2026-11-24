@@ -181,8 +181,14 @@ test('HTTP, QR, concorrência, pagamentos, permissões e persistência', {timeou
   await mobile.request(`cards/${card.id}`,undefined,403);
   await mobile.request('scan',{code:'https://example.com',mode:'direct'},400);
   const pairing=await admin.request('pairing/code',{name:'Caixa de teste'});
+  await mobile.request('pairing/link',{code:'000000'},409);
+  assert.ok(!terminal.history.some(event=>event.name==='paired'));
   assert.equal((await mobile.request('pairing/link',{code:pairing.code})).reader.name,'Caixa de teste');
+  assert.equal((await terminal.until('paired')).readerName,staff.name);
+  assert.ok(!unrelated.history.some(event=>event.name==='paired'));
+  assert.ok(!reader.history.some(event=>event.name==='paired'));
   await other.request('pairing/link',{code:pairing.code},409);
+  await assert.rejects(terminal.until('paired',100),/Evento não recebido/);
   const started=performance.now();
   const pairedScan=await mobile.request('scan',{code,mode:'paired'});
   assert.equal(pairedScan.sent,true);

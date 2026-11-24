@@ -276,6 +276,12 @@ function startEvents() {
   });
   stream.addEventListener('change',scheduleRefresh);
   stream.addEventListener('pairing',scheduleRefresh);
+  stream.addEventListener('paired',()=>{
+    if (stream!==events || !state.me) return;
+    if (dialogState.type==='terminal') closeModal();
+    toast('Celular vinculado com sucesso.');
+    scheduleRefresh();
+  });
   stream.addEventListener('card',event=>{
     if (dialogState.type==='terminal') closeModal();
     const card=JSON.parse(event.data);
@@ -750,6 +756,18 @@ async function actions(action,element) {
       const theme=state.theme==='dark'?'light':'dark';
       applyTheme(theme);
       try {localStorage.setItem(themeKey,theme);} catch {}
+      return;
+    }
+    case 'toggle-password': {
+      const field=document.getElementById(element.getAttribute('aria-controls'));
+      if (!field?.matches('input[data-password]')) return;
+      const show=field.type==='password';
+      const start=field.selectionStart,end=field.selectionEnd,direction=field.selectionDirection;
+      field.type=show?'text':'password';
+      element.setAttribute('aria-pressed',String(show));
+      $('span',element).textContent=show?'Ocultar senha':'Ver senha';
+      field.focus({preventScroll:true});
+      if (start!=null && end!=null) field.setSelectionRange(start,end,direction);
       return;
     }
     case 'menu': $('.layout')?.classList.toggle('menu-open'); return;

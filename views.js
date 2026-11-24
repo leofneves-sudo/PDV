@@ -1,4 +1,4 @@
-import {h,icon,btn,iconBtn,empty,header,lab,input,select,search,textarea,normalize,money,num,dt,humanDay,cardNumber,badge,avatar,pagination} from './ui.js';
+import {h,icon,btn,iconBtn,empty,header,lab,input,passwordField,select,search,textarea,normalize,money,num,dt,humanDay,cardNumber,badge,avatar,pagination} from './ui.js';
 import {expiryInfo,storeDay} from './expiry.mjs';
 
 const productExpiry=(product,state)=>expiryInfo(product,storeDay(Date.now(),state.config?.timezone || 'America/Sao_Paulo'));
@@ -81,7 +81,7 @@ export function auth(config,connected=true,theme='light') {
         `<form data-form="${setup?'setup':'login'}" class="auth-form">
           ${setup ? lab('Nome do administrador',input('name','','required autocomplete="name" maxlength="120" autofocus')) : ''}
           ${lab('Usuário',input('username','',`required autocomplete="username" maxlength="40" ${setup?'minlength="3" placeholder="Ex. leonardo"':'autofocus placeholder="Seu usuário"'}`))}
-          ${lab('Senha',input('password','',`required type="password" autocomplete="${setup?'new-password':'current-password'}" maxlength="128" ${setup?'minlength="10" placeholder="Pelo menos 10 caracteres"':'placeholder="Sua senha"'}`))}
+          ${passwordField('Senha','password',`required autocomplete="${setup?'new-password':'current-password'}" maxlength="128" ${setup?'minlength="10" placeholder="Pelo menos 10 caracteres"':'placeholder="Sua senha"'}`)}
           <div class="form-error" role="alert" hidden></div>
           <button class="btn primary full" type="submit">${setup?'Criar administrador':'Entrar'} ${icon('chevron',18)}</button>
         </form>`}
