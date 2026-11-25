@@ -30,12 +30,13 @@ export const navigation = [
   ['supplies','Compras e fornecedores','box','suppliers','Cadastros'],
   ['cards','Cartões QR','qr','cards','Cadastros'],
   ['users','Operadores','shield','users','Administração'],
+  ['site-import','Importar do site','link','admin','Administração'],
   ['management','Conferência gerencial','chart','reports','Administração'],
   ['audit','Auditoria','clipboard','audit','Administração'],
   ['backups','Backups','export','backup','Administração']
 ];
 export const allowed = (user,permission) => Array.isArray(permission) ?
-  permission.some(key=>user?.permissions[key]) : !!user?.permissions[permission];
+  permission.some(key=>user?.permissions[key]) : permission==='admin'?user?.role==='admin':!!user?.permissions[permission];
 export const permissionsFor = (state,key) => allowed(state.me,key);
 export const pairingNeeded = state => !!state.config?.pairingRequired && !state.pairing?.reader;
 export function initialView(user,fragment) {

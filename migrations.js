@@ -3,10 +3,10 @@ const {snapshot}=require('./backup');
 
 function migrate(db,file,existing) {
   const version=db.prepare('PRAGMA user_version').get().user_version;
-  if (version>=4) return;
+  if (version>=5) return;
   if (existing && file!==':memory:') {
     const dir=resolve(process.env.PDV_BACKUP_DIR || join(dirname(file),'backups'));
-    console.log('Backup pré-migração:',snapshot(db,dir,'pre-migracao-v4'));
+    console.log('Backup pré-migração:',snapshot(db,dir,'pre-migracao-v5'));
   }
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -140,7 +140,14 @@ function migrate(db,file,existing) {
     `);
     if (version<3) require('./revision').migrateRevision(db);
     if (version<4) db.exec('ALTER TABLE products ADD COLUMN expires_on TEXT');
-    db.exec('PRAGMA user_version=4');
+    if (version<5) db.exec(`
+      CREATE TABLE web_product_sources (
+        source_key TEXT PRIMARY KEY NOT NULL, product_id INTEGER NOT NULL REFERENCES products(id),
+        source_url TEXT NOT NULL, imported_at TEXT NOT NULL
+      );
+      CREATE INDEX web_product_sources_product ON web_product_sources(product_id);
+    `);
+    db.exec('PRAGMA user_version=5');
     if (db.prepare('PRAGMA foreign_key_check').get()) throw Error('A migração encontrou referências inválidas.');
     db.exec('COMMIT');
   } catch (error) {

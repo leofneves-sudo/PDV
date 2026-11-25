@@ -306,6 +306,42 @@ O QR contém um identificador aleatório do cartão. Para consultar ou operar um
 - O fechamento registra pagamentos, estoque, consumo de crédito, auditoria e liberação do cartão na mesma transação SQLite. Se a conexão cair, a tela informa o estado e aguarda confirmação. Consulte o comprovante ou o histórico antes de repetir um pagamento registrado na maquininha.
 - Dados de cartão são registrados como forma e valor do pagamento. A autorização pela maquininha, quando utilizada, é feita separadamente.
 
+## Importar produtos da loja na Liga
+
+O menu **Administração → Importar do site** é exclusivo do administrador. Ele lê listagens e páginas de produtos de `www.lastplacetcg.com.br`, prepara uma prévia e cadastra no PDV somente os itens selecionados e confirmados. Operadores não recebem esse acesso, mesmo que possam editar produtos ou movimentar estoque.
+
+1. Entre como administrador e abra **Importar do site**. O campo já começa com o link de exemplo da Last Place TCG. Você pode substituir pelo link de outra listagem ou produto da mesma loja.
+2. Ajuste os filtros no site e copie o endereço completo para **Link da listagem ou do produto**. Informe a categoria padrão do PDV para os itens cujo HTML não informar categoria.
+3. Deixe **Percorrer todas as páginas desse filtro** marcado para analisar a listagem desde a primeira página. Os filtros do link, como categoria e disponibilidade, são preservados. Desmarque para ler somente a página indicada no endereço.
+4. Deixe **Buscar preço e estoque nas páginas dos produtos** marcado e clique em **Analisar link**. Depois da listagem, o PDV abre os links dos itens com preço ou estoque ausente e completa os campos pela tabela da página individual. A tela mostra quantas páginas de produtos já foram consultadas. A análise não altera produtos nem estoque.
+5. Se a loja exigir verificação de acesso, o importador abre uma janela separada de Chrome, Edge ou Brave no computador. Conclua a verificação nessa janela; o sistema aguarda até três minutos por página protegida e continua a leitura depois da liberação. Essa janela usa um perfil próprio em `data/site-import/browser-profile`, sem utilizar o perfil pessoal do navegador, e fecha ao terminar ou cancelar a análise.
+6. Confira os nomes, preços de venda, quantidades, categorias, edições, idiomas e condições identificados. Os valores presentes na listagem são preservados; a consulta individual completa somente o que falta. Se a página tiver várias versões, o PDV confere idioma, condição e edição informados na listagem. Se não conseguir identificar uma única versão ou se o site não fornecer algum campo, ele fica em branco com um aviso para conferência. O sistema lê o estoque publicado, sem confundir com a quantidade escolhida no botão de compra. A validade é gerenciada em **Produtos** e não aparece na tabela de importação. As atualizações preservam a validade cadastrada; para alimentação e bebidas, cadastre-a em **Produtos** e refaça a análise antes de importar.
+7. Marque os itens desejados ou use **Selecionar todos os válidos**. O campo de busca filtra os produtos da análise. Para escolher apenas parte do catálogo, desmarque os demais.
+8. Use **Copiar as fotos disponíveis** para trazer também as imagens que o site disponibiliza em origens suportadas. Se uma foto não puder ser copiada, os outros dados do produto ainda são cadastrados e o resultado informa a quantidade de fotos indisponíveis.
+9. Clique em **Importar selecionados**. Confira o total de produtos novos, atualizados e ignorados. Os produtos cadastrados ficam disponíveis em **Produtos** e no catálogo de atendimento, conforme estoque, status e validade.
+
+### Produtos existentes e quantidades
+
+Por padrão, uma nova análise reconhece os produtos já importados e não os seleciona para duplicação. A origem é registrada no banco, de modo que repetir o mesmo link não cria outro cadastro do mesmo item.
+
+Para alterar esses cadastros, marque **Atualizar também os produtos já importados**, selecione os itens e confira os valores. Essa opção substitui os dados revisados, o preço e a quantidade; **o estoque informado é o saldo final, não uma entrada a somar**. Custos, códigos de barras, estoque mínimo e status já cadastrados são preservados.
+
+A atualização é recusada se o cadastro ou estoque mudar depois da análise, inclusive durante a cópia das fotos. O saldo final não pode ficar abaixo do estoque reservado em comandas. Nessas situações, analise o link novamente e confira os valores atuais antes de confirmar.
+
+A importação é pontual. Ela não envia vendas do PDV para o site nem mantém uma sincronização contínua de estoque. Produtos novos cujo site não informa custo ficam com custo desconhecido, para preenchimento posterior no cadastro.
+
+### Arquivo HTML e limites de leitura
+
+Se a leitura pelo link não for liberada, abra **Usar um arquivo HTML salvo da página**, selecione o arquivo da listagem depois que os produtos estiverem visíveis e clique em **Analisar HTML**. Mantenha o link da origem preenchido acima. O limite desse arquivo é de 1 MB; esse modo lê a listagem do arquivo e avisa quando há outras páginas. Com **Buscar preço e estoque nas páginas dos produtos** marcado, ele também acessa os links individuais para completar os campos ausentes. Desmarque essa opção para analisar apenas o arquivo, sem consultar o site. Scripts do HTML não são executados dentro do PDV.
+
+As consultas individuais são sequenciais, com intervalo de dois segundos entre produtos. O mesmo link é consultado uma vez por análise, mesmo que a listagem contenha várias versões dele. Se o site responder com limite de acessos (HTTP 429), o leitor aguarda o prazo informado pelo site, ou um minuto quando não houver prazo, e tenta novamente até duas vezes. O andamento informa a espera. Se o bloqueio persistir, a análise é interrompida e deve ser refeita mais tarde. Erros isolados de uma página deixam avisos nos produtos afetados e não impedem a consulta dos demais. **Cancelar análise** interrompe também essa etapa.
+
+Cada análise aceita até 10 mil produtos e 200 páginas, com limite de quinze minutos para a navegação. Se o site repetir páginas, ultrapassar os limites ou alterar filtros durante um redirecionamento, o resultado incompleto não é liberado para importação. Refine os filtros do link e tente novamente.
+
+A gravação ocorre em lotes de até 100 produtos. Um lote inválido não é gravado; lotes anteriores já concluídos permanecem cadastrados e aparecem no resultado. Fotos indisponíveis não impedem os demais dados de serem gravados. Reenvios da mesma seleção na mesma análise não repetem a gravação dos itens já processados.
+
+Prévia e seleção pertencem à sessão do administrador. Se sair da conta ou reiniciar o servidor, faça uma nova análise. Os produtos já cadastrados e o vínculo com a origem permanecem no banco. Para abrir o navegador de importação em uma instalação fora dos caminhos usuais, configure `PDV_IMPORT_BROWSER` no servidor com o caminho completo de Chrome, Edge ou Brave.
+
 
 ## Atualização operacional
 
@@ -367,6 +403,8 @@ A migração SQLite 3 cria o registro das chaves e das correções de compras, a
 
 A migração SQLite 4 acrescenta a validade ao cadastro de produtos e preserva os registros existentes. O servidor cria um backup antes de migrar um banco em arquivo.
 
+A migração SQLite 5 cria o registro das origens de produtos importados do site e preserva os cadastros, comandas e movimentações existentes. Também cria um backup consistente antes de atualizar um banco em arquivo.
+
 ### Backup, migração e restauração
 
 As migrações versionadas de SQLite fazem cópia consistente antes de alterar um banco existente. Os recebimentos históricos preservam a origem e a data conhecidas. Turnos anteriores à atualização aparecem como legado, sem atribuição inventada.
@@ -393,6 +431,14 @@ Para validar o atendimento responsivo em um navegador Chromium instalado (Chrome
 ```sh
 npm run test:mobile
 ```
+
+Para validar o menu de importação com um catálogo controlado, sem acessar a loja real nem alterar os dados de operação:
+
+```sh
+npm run test:site-import
+```
+
+Essa verificação cobre análise de várias páginas, preenchimento automático pelas páginas individuais, revisão de campos pendentes, seleção, fotos, reconhecimento de produtos existentes, arquivo HTML, permissões e uso em telas de 320 a 1366 px. A suíte `npm test` também verifica o leitor em um perfil temporário do navegador, conteúdo carregado dinamicamente, identidade e versões dos produtos, espera por limite de acessos, cancelamento, filtros dos links, controle das reservas e rejeição de alterações concorrentes no estoque.
 
 Esse teste usa banco em memória, contas fictícias e um perfil separado do navegador. Verifica inclusão e edição de produtos, troca de comandas, busca, sincronização com o caixa, queda e recuperação de conexão e 12 resoluções entre 320 e 1366 px. Salva capturas e o resultado em `test-output/mobile/`. Para outro caminho de navegador, defina `PDV_TEST_BROWSER` com o executável. A emulação não substitui a conferência da câmera e do teclado nos aparelhos reais.
 

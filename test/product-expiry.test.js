@@ -61,11 +61,11 @@ test('migração de banco existente preserva produtos e pode executar novamente'
     const {migrate}=require('../migrations');
     migrate(legacy,':memory:',true);
     migrate(legacy,':memory:',true);
-    assert.equal(legacy.prepare('PRAGMA user_version').get().user_version,4);
+    assert.equal(legacy.prepare('PRAGMA user_version').get().user_version,5);
     const row=legacy.prepare('SELECT * FROM products').get();
     assert.equal(row.name,'Lanche');
     assert.equal(row.expires_on,null);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version,4);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version,5);
   } finally {legacy.close();}
 });
 
