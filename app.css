@@ -152,6 +152,18 @@ a {color:var(--blue-dark)}
 .site-import-table td:nth-child(4),.site-import-table td:nth-child(5) {min-width:125px}
 .site-import-table td:last-child {min-width:200px}
 .site-import-table td small,.site-import-table td a {display:block;font-size:.78rem;margin-top:.4rem;overflow-wrap:anywhere}
+.site-sync-list {display:grid;gap:1rem}
+.site-sync-job {border:1px solid var(--line);border-radius:12px;padding:1rem;min-width:0}
+.site-sync-heading,.site-sync-history summary {display:flex;justify-content:space-between;align-items:center;gap:.7rem;flex-wrap:wrap}
+.site-sync-heading h3 {margin:0;font-size:1rem}
+.site-sync-url {display:block;font-size:.85rem;overflow-wrap:anywhere;margin:.6rem 0}
+.site-sync-job p,.site-sync-history p,.site-sync-issues {overflow-wrap:anywhere}
+.site-sync-status.error,.site-sync-status.warning {color:var(--red)}
+.site-sync-status.success {color:var(--green)}
+.site-sync-history {padding:.8rem 0;border-bottom:1px solid var(--line)}
+.site-sync-history summary {cursor:pointer;min-height:44px}
+.site-sync-history table {min-width:620px}
+.site-sync-issues {padding-left:1.25rem;font-size:.88rem;color:var(--red)}
 .site-import-panel>summary {cursor:pointer;min-height:44px;font-weight:650}
 .site-import-footer {justify-content:flex-end}
 .site-import-footer>span {margin-right:auto;color:var(--muted);font-size:.88rem}

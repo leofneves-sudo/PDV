@@ -31,6 +31,7 @@ export const navigation = [
   ['cards','Cartões QR','qr','cards','Cadastros'],
   ['users','Operadores','shield','users','Administração'],
   ['site-import','Importar do site','link','admin','Administração'],
+  ['site-sync','Sincronização do site','rotate','admin','Administração'],
   ['management','Conferência gerencial','chart','reports','Administração'],
   ['audit','Auditoria','clipboard','audit','Administração'],
   ['backups','Backups','export','backup','Administração']

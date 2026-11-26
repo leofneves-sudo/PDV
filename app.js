@@ -4,6 +4,7 @@ import * as modals from './modals.js';
 import * as scanner from './scanner.js';
 import * as updates from './updates.js';
 import * as siteImportUi from './site-import-ui.js';
+import * as siteSyncUi from './site-sync-ui.js';
 
 const app=$('#app');
 const dialog=$('#modal');
@@ -186,6 +187,7 @@ function showPairingGate() {
 }
 function locked(message='') {
   siteImportUi.reset(state);
+  siteSyncUi.reset(state);
   authVersion++;
   events?.close();
   events=null;
@@ -281,6 +283,9 @@ function startEvents() {
   stream.addEventListener('site-import',()=>{
     if(stream===events && state.view==='site-import')scheduleRefresh();
   });
+  stream.addEventListener('site-sync',()=>{
+    if(stream===events && state.view==='site-sync')scheduleRefresh();
+  });
   stream.addEventListener('paired',()=>{
     if (stream!==events || !state.me) return;
     if (dialogState.type==='terminal') closeModal();
@@ -329,6 +334,7 @@ function scheduleRefresh() {
 async function load(view) {
   switch (view) {
     case 'site-import': return siteImportUi.load(importContext());
+    case 'site-sync': return siteSyncUi.load(importContext());
     case 'dashboard': {
       const [report,filters,products,stockInsights]=await Promise.all([api(query('dashboard',state.dashboardApplied)),api('filters'),can(['products','stock'])?api('products'):Promise.resolve([]),api(query('stock-insights',{idleDays:state.insightIdleDays}))]);
       return {report,filters,products,stockInsights};
@@ -375,6 +381,7 @@ const pages={dashboard:views.dashboard,pos:views.pos,scanner:views.scannerView,p
   cash:updates.cashPage,supplies:updates.suppliesPage,management:updates.managementPage,backups:updates.backupsPage,
   insights:views.stockInsightsView,
   'site-import':siteImportUi.page,
+  'site-sync':siteSyncUi.page,
   account:()=>header('Sua sessão','Nenhuma tela está disponível para as permissões deste operador.')};
 function focusBefore() {
   const active=document.activeElement;
@@ -756,6 +763,7 @@ function extensionContext() {
 function importContext(){return {...extensionContext(),render:renderPage};}
 async function actions(action,element) {
   if(action.startsWith('site-import-'))return siteImportUi.act(importContext(),action,element);
+  if(action.startsWith('site-sync-'))return siteSyncUi.act(importContext(),action,element);
   const id=Number(element.dataset.id)||null;
   const data=state.card?.order;
   if (action.startsWith('ext-')) return updates.act(extensionContext(),action.slice(4),element);
@@ -1053,6 +1061,7 @@ async function checkout(form,context,mode) {
 }
 async function submit(form,name,fields,context) {
   if(name.startsWith('site-import-'))return siteImportUi.submit(importContext(),form,name,fields);
+  if(name==='site-sync-save')return siteSyncUi.submit(importContext(),form);
   const id=Number(fields.id)||null;
   const protect=(path,payload)=>updates.protectedSend(extensionContext(),path,payload,context);
   if (name.startsWith('ext-')) return updates.submit(extensionContext(),name.slice(4),fields,context);
@@ -1252,6 +1261,7 @@ document.addEventListener('input',event=>{
   const field=event.target;
   if (event.isComposing) return;
   if(state.view==='site-import')siteImportUi.inputChanged(importContext(),field);
+  if(state.view==='site-sync')siteSyncUi.inputChanged(importContext(),field);
   uppercaseField(field);
   if (field.name==='category' && field.form?.dataset.form==='product') modals.updateProductExpiry(field.form);
   if (field.hasAttribute('data-money') && event.inputType==='insertFromPaste') {
@@ -1288,6 +1298,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const field=event.target;
   if(state.view==='site-import')siteImportUi.changed(importContext(),field);
+  if(state.view==='site-sync')siteSyncUi.inputChanged(importContext(),field);
   uppercaseField(field);
   if (field.name==='category' && field.form?.dataset.form==='product') modals.updateProductExpiry(field.form);
   if (field.name==='period' && ['dashboard','management'].includes(state.view)) {

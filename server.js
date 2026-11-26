@@ -22,6 +22,10 @@ const backups=require('./backup').controller(db,file);
 const siteImports=require('./site-import').createController({notify:(owner,id)=>{
   for(const socket of clients.get(owner) || [])event(socket,'site-import',{id});
 }});
+const siteSync=require('./site-sync').createScheduler({importer:siteImports,notify:changed=>{
+  for(const [hash,sockets] of clients)if(findSession(hash)?.role==='admin')for(const socket of sockets)event(socket,'site-sync',{});
+  if(changed)broadcast();
+}});
 
 const host = process.env.PDV_HOST || '127.0.0.1';
 const port = Number(process.env.PDV_PORT || 3000);
@@ -37,7 +41,7 @@ const assets = {
   '/views.js':'views.js','/updates.js':'updates.js','/modals.js':'modals.js','/scanner.js':'scanner.js','/ui.js':'ui.js','/brand.svg':'brand.svg',
   '/qr-scanner.min.js':'node_modules/qr-scanner/qr-scanner.min.js',
   '/qr-scanner-worker.min.js':'node_modules/qr-scanner/qr-scanner-worker.min.js',
-  '/expiry.mjs':'expiry.mjs','/site-import-ui.js':'site-import-ui.js'
+  '/expiry.mjs':'expiry.mjs','/site-import-ui.js':'site-import-ui.js','/site-sync-ui.js':'site-sync-ui.js'
 };
 const contentTypes = {html:'text/html',css:'text/css',js:'text/javascript',mjs:'text/javascript',svg:'image/svg+xml'};
 const okay = (data,changed=false) => ({data,changed});
@@ -494,6 +498,15 @@ async function handle(req,res) {
   const current = findSession(hash);
   if (!current) fail('Entre com seu usuário para continuar.',401);
   requirePairing(req,current,path);
+  if(path.startsWith('site-sync/')) {
+    let result;
+    if(method==='GET' && path==='site-sync/list')result=siteSync.list(current);
+    else if(method==='POST' && path==='site-sync/save')result=siteSync.save(current,body);
+    else if(method==='POST' && path==='site-sync/remove')result=siteSync.remove(current,body.id);
+    else if(method==='POST' && path==='site-sync/run')result=siteSync.request(current,body.id,{interactive:body.interactive===true});
+    else fail('Recurso não encontrado.',404);
+    return send(res,result);
+  }
   if(path.startsWith('site-import/')) {
     let result;
     if(method==='GET' && path==='site-import/config') {
@@ -530,9 +543,11 @@ server.listen(port,host,()=>{
   const address = server.address();
   const printed = host.includes(':') ? `[${host}]` : host === '0.0.0.0' ? 'localhost' : host;
   backups.start(result=>audit(null,result.error?'backup.falha':'backup.automatico','backup',null,null,{file:result.file},result.error ?? null));
+  siteSync.start();
   console.log(`Balcão PDV • ${tls ? 'https' : 'http'}://${printed}:${address.port}`);
 });
 async function stop() {
+  await siteSync.close();
   await siteImports.close();
   reportPool.close();
   for (const streams of clients.values()) for (const response of streams) response.end();

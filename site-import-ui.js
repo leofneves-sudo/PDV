@@ -55,7 +55,7 @@ export function page(state) {
   const d=draft(state),job=d.job,busy=active(job)||d.submitting;
   const list=filtered(d),pages=Math.max(1,Math.ceil(list.length/50));d.page=Math.min(d.page,pages);
   const visible=list.slice((d.page-1)*50,d.page*50);
-  return `${header('Importar produtos do site','Analise o link da sua loja na Liga e confira os dados antes de cadastrar no PDV.')}
+  return `${header('Importar produtos do site','Analise o link da sua loja na Liga e confira os dados antes de cadastrar no PDV.',btn('Sincronização automática','site-import-sync',{ico:'rotate'}))}
     <section class="panel site-import-panel"><form data-form="site-import-analyze" class="site-import-form">
       ${lab('Link da listagem ou do produto',input('url',d.url,'type="url" data-verbatim required maxlength="3000" placeholder="https://www.lastplacetcg.com.br/?view=ecom%2Fitens..."'),'span-two')}
       ${lab('Categoria padrão quando o site não informar',input('category',d.category,'data-verbatim required maxlength="80"'))}
@@ -136,6 +136,7 @@ export async function submit(ctx,form,name,fields) {
 }
 export async function act(ctx,action,element) {
   const d=draft(ctx.state);
+  if(action==='site-import-sync')return ctx.navigate('site-sync');
   if(d.submitting)return;
   if(action==='site-import-cancel') {d.job=await ctx.send('site-import/cancel',{id:d.id});return ctx.reload();}
   if(action==='site-import-select-all'){for(const row of filtered(d))if(eligible(d,row))d.selected.add(row.key);return redraw(ctx);}

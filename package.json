@@ -11,6 +11,7 @@
     "test": "node --test",
     "test:mobile": "node scripts/check-mobile.cjs",
     "test:site-import": "node scripts/check-site-import.cjs",
+    "test:site-sync": "node scripts/check-site-sync.cjs",
     "celular": "node scripts/celular.cjs",
     "restaurar": "node scripts/restore.cjs"
   },

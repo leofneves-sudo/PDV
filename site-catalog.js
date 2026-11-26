@@ -200,7 +200,7 @@ function parsePage(html,urlValue,{defaultCategory='Produtos Liga'}={}) {
   });
   const nextPage=pages.length ? current+1 : null;
   if(!rows.length)warnings.push('Nenhum produto reconhecido no HTML. Confira se a página terminou de carregar e se o link é de um catálogo da Liga.');
-  return {challenge:false,rows,nextPage,title,warnings};
+  return {challenge:false,rows,nextPage,title,warnings,listing:url.searchParams.get('view')==='ecom/itens' && $('.cards').length>0};
 }
 function pageUrl(original,page) {
   const url=storeUrl(original);url.searchParams.set('page',String(page));return url.href;

@@ -342,6 +342,46 @@ A gravação ocorre em lotes de até 100 produtos. Um lote inválido não é gra
 
 Prévia e seleção pertencem à sessão do administrador. Se sair da conta ou reiniciar o servidor, faça uma nova análise. Os produtos já cadastrados e o vínculo com a origem permanecem no banco. Para abrir o navegador de importação em uma instalação fora dos caminhos usuais, configure `PDV_IMPORT_BROWSER` no servidor com o caminho completo de Chrome, Edge ou Brave.
 
+## Sincronização automática do estoque com a Liga
+
+Abra **Administração → Sincronização do site**, ou clique em **Sincronização automática** na tela de importação. Essa rotina local consulta os links no servidor do PDV, sem usar uma IA externa e sem enviar os dados de vendas da loja.
+
+1. Dê um nome ao acompanhamento, cole o link da listagem ou do produto e informe a categoria para os produtos novos.
+2. Escolha o **Intervalo em minutos**. O padrão é 30 minutos; são aceitos intervalos entre 5 minutos e 24 horas.
+3. Deixe **Ativar consultas automáticas** marcado. Escolha se a rotina também deve **Cadastrar novos produtos encontrados com preço e estoque identificados**.
+4. Clique em **Salvar acompanhamento**. A primeira consulta entra na fila automaticamente. É possível cadastrar até 20 links, cada um com seu intervalo.
+5. Confira o andamento, a próxima consulta e o histórico. **Verificar agora** antecipa uma consulta; **Pausar** interrompe o acompanhamento, inclusive uma leitura em andamento. **Remover link** encerra apenas o agendamento, preservando os produtos e os movimentos já registrados.
+
+### Como as vendas locais são preservadas
+
+Como as vendas feitas no PDV não baixam o site, a rotina aplica a diferença entre duas quantidades observadas no site, sobre o saldo atual do PDV. Ela não substitui repetidamente o estoque local pela quantidade absoluta do site.
+
+| Situação | Estoque do site | Estoque do PDV |
+| --- | --- | --- |
+| Produto importado | 10 | 10 |
+| Venda de 2 unidades pelo PDV | 10 | 8 |
+| Nova consulta sem mudança no site | 10 | 8 |
+| Site baixa de 10 para 9 | 9 | 7 |
+| Site recebe 3 unidades, subindo de 9 para 12 | 12 | 10 |
+
+As importações manuais confirmadas registram a quantidade observada no site como referência. Para cadastros anteriores a essa atualização ou sem referência conhecida, a primeira consulta automática apenas registra a quantidade externa: **o saldo atual do PDV é preservado**. As diferenças passam a ser aplicadas nas consultas seguintes. A referência é compartilhada entre links sobrepostos, evitando repetir a mesma entrada ou baixa.
+
+As alterações usam as movimentações de estoque e a auditoria normais do PDV, incluindo os cálculos de custo do saldo. Vendas e ajustes locais ocorridos durante a leitura são considerados no saldo usado para aplicar a diferença. Preço de venda, nome, categoria, custo unitário, estoque mínimo, código de barras, foto, validade e status de produtos existentes são preservados. Produtos novos usam preço e quantidade identificados no site, e a foto disponível é copiada quando possível. Produtos de alimentação ou bebidas continuam exigindo validade cadastrada em **Produtos**.
+
+### Pendências, execução e reinício
+
+Se uma mudança externa deixaria o saldo negativo ou abaixo de reservas em comandas, o produto fica com uma pendência no histórico. Essa diferença não é considerada aplicada: após conferir as vendas, as reservas e o saldo físico, a próxima leitura pode tentar novamente. Produtos inativos não são reativados. Entradas em produtos vencidos ou sem validade obrigatória são bloqueadas.
+
+Produtos já acompanhados que somem de uma listagem filtrada por disponibilidade continuam sendo consultados por seus links individuais. O estoque só é reduzido a partir de uma quantidade explícita: ausência de um produto, falha HTTP, página bloqueada ou dado ambíguo não significam saldo zero. Uma listagem vazia reconhecida permite consultar os itens já acompanhados; uma página desconhecida ou uma paginação incompleta não é aplicada.
+
+As consultas são executadas uma por vez e compartilham o leitor com a importação manual. Quando o leitor estiver ocupado, o agendamento aguarda e tenta novamente. O intervalo de cada link é contado a partir da conclusão da consulta; uma fila de outros links pode atrasar o início. A leitura mantém os limites de páginas, produtos e espera do importador. Cada execução automática tem um limite total de vinte minutos.
+
+O computador e o servidor do PDV precisam estar ligados e ter acesso à internet. O navegador do PDV pode estar fechado e não é necessário manter o administrador conectado: a autorização vem do agendamento salvo. O administrador responsável precisa continuar ativo com perfil de administrador. Configurações, referências e histórico ficam no SQLite, sobrevivem ao reinício e entram nos backups. Uma consulta interrompida é registrada e refeita; não há reprodução das baixas já aplicadas.
+
+Consultas agendadas não abrem janelas do navegador. Se o site exigir verificação de acesso, a rotina informa a falha ou pendência e preserva os saldos que não puder ler. Use **Verificar com navegador** para iniciar uma consulta com a janela de verificação no computador. Essa ação não garante que o site liberará futuras consultas automáticas. Limites de acessos são respeitados com espera e novas tentativas.
+
+O histórico mostra as últimas 20 consultas, com produtos novos, referências iniciais, diferenças aplicadas e pendências. As alterações e as configurações também ficam na auditoria. Fotos ou informações ausentes de um produto não são inventadas; produtos novos incompletos ficam pendentes para conferência.
+
 
 ## Atualização operacional
 
@@ -405,6 +445,8 @@ A migração SQLite 4 acrescenta a validade ao cadastro de produtos e preserva o
 
 A migração SQLite 5 cria o registro das origens de produtos importados do site e preserva os cadastros, comandas e movimentações existentes. Também cria um backup consistente antes de atualizar um banco em arquivo.
 
+A migração SQLite 6 acrescenta as referências de estoque externo e os agendamentos, vínculos e histórico da sincronização automática. Os dados existentes são preservados e um backup é feito antes da atualização. Referências antigas começam desconhecidas, para que a primeira leitura não sobrescreva vendas locais.
+
 ### Backup, migração e restauração
 
 As migrações versionadas de SQLite fazem cópia consistente antes de alterar um banco existente. Os recebimentos históricos preservam a origem e a data conhecidas. Turnos anteriores à atualização aparecem como legado, sem atribuição inventada.
@@ -440,7 +482,15 @@ npm run test:site-import
 
 Essa verificação cobre análise de várias páginas, preenchimento automático pelas páginas individuais, revisão de campos pendentes, seleção, fotos, reconhecimento de produtos existentes, arquivo HTML, permissões e uso em telas de 320 a 1366 px. A suíte `npm test` também verifica o leitor em um perfil temporário do navegador, conteúdo carregado dinamicamente, identidade e versões dos produtos, espera por limite de acessos, cancelamento, filtros dos links, controle das reservas e rejeição de alterações concorrentes no estoque.
 
-Esse teste usa banco em memória, contas fictícias e um perfil separado do navegador. Verifica inclusão e edição de produtos, troca de comandas, busca, sincronização com o caixa, queda e recuperação de conexão e 12 resoluções entre 320 e 1366 px. Salva capturas e o resultado em `test-output/mobile/`. Para outro caminho de navegador, defina `PDV_TEST_BROWSER` com o executável. A emulação não substitui a conferência da câmera e do teclado nos aparelhos reais.
+Para validar a configuração e a execução da sincronização automática com um catálogo controlado:
+
+```sh
+npm run test:site-sync
+```
+
+Essa verificação cobre os links salvos, o intervalo, a consulta automática, o histórico, a preservação das vendas locais, a pausa, a remoção de acompanhamentos, permissões e telas de 320 a 1366 px. A suíte `npm test` cobre também o temporizador, retomada após reinício, referências compartilhadas entre links, produto ausente da listagem, reservas, estoque negativo, falhas de leitura e cancelamento durante uma consulta.
+
+O teste de atendimento responsivo usa banco em memória, contas fictícias e um perfil separado do navegador. Verifica inclusão e edição de produtos, troca de comandas, busca, sincronização com o caixa, queda e recuperação de conexão e 12 resoluções entre 320 e 1366 px. Salva capturas e o resultado em `test-output/mobile/`. Para outro caminho de navegador, defina `PDV_TEST_BROWSER` com o executável. A emulação não substitui a conferência da câmera e do teclado nos aparelhos reais.
 
 Os testes usam instâncias e bancos separados dos dados reais. A suíte gera e decodifica os QR Codes e verifica pareamento, sincronização por eventos, reservas e permissões. Também cobre pagamentos parciais e mistos, PIX, troco, concorrência de crédito, transferência com pagamentos, devoluções, turnos, relatórios, importação CSV, desmembramento e recuperação a partir do backup.
 

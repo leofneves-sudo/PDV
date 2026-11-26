@@ -37,10 +37,10 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
   function publish(job,status,message) {
     const changed=job.status!==status || job.message!==message;
     job.status=status;job.message=message;job.updatedAt=Date.now();
-    if(changed)notify(job.owner,job.id);
+    if(changed){notify(job.owner,job.id);job.onProgress?.(summary(job));}
   }
   function current(job) {
-    const actor=findSession(job.owner);
+    const actor=job.backgroundUser?get("SELECT * FROM users WHERE id=? AND active=1 AND role='admin'",job.backgroundUser):findSession(job.owner);
     if(!actor)fail('A sessão do administrador foi encerrada. Entre novamente.',401);
     if(actor.role!=='admin')fail('A sessão perdeu a permissão de administrador.',403);
     return actor;
@@ -136,6 +136,7 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
     let reader;
     try {
       reader=readerFactory({directory:profile,signal:job.controller.signal,...readerOptions,
+        ...(job.backgroundUser?{interactive:job.interactive===true}:{}),
         onWaiting:message=>publish(job,'waiting',message)});
       job.reader=reader;
       let page=job.allPages?1:Number(new URL(job.url).searchParams.get('page') || 1);
@@ -148,11 +149,16 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
         if(job.pages>=maxPages)throw Error('A listagem ultrapassa '+maxPages+' páginas. Refine os filtros do link.');
         publish(job,'collecting','Analisando a página '+page+' do link informado.');
         const url=pageUrl(job.url,page);
-        const html=await reader.read(url,{defaultCategory:job.category,productDetails:new URL(url).searchParams.get('view')==='ecom/item'});
+        const html=await reader.read(url,{defaultCategory:job.category,productDetails:new URL(url).searchParams.get('view')==='ecom/item',allowEmpty:!!job.trackedRows?.length});
         current(job);job.controller.signal.throwIfAborted();
         const parsed=parsePage(html,url,{defaultCategory:job.category});
         if(parsed.challenge)throw Error('O site ainda exige verificação de acesso. Conclua-a no navegador ou use um arquivo HTML.');
-        if(!parsed.rows.length)throw Error('Nenhum produto foi identificado nesta página. Confira o link ou use o HTML da listagem carregada.');
+        if(!parsed.rows.length) {
+          if(job.backgroundUser && job.trackedRows?.length && parsed.listing && job.pages===0) {
+            job.pages++;job.warnings.push('A listagem está vazia. Somente as páginas individuais dos produtos já acompanhados foram consultadas.');break;
+          }
+          throw Error('Nenhum produto foi identificado nesta página. Confira o link ou use o HTML da listagem carregada.');
+        }
         const pageKey=sha(JSON.stringify(parsed.rows.map(row=>[row.key,row.price,row.stock])));
         if(visited.has(pageKey))throw Error('O site repetiu a mesma página. A análise foi interrompida para não importar um catálogo incompleto.');
         visited.add(pageKey);addRows(job,parsed);job.pages++;
@@ -160,6 +166,11 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
         if(!job.allPages || !parsed.nextPage)break;
         page=parsed.nextPage;
         await delay(300,undefined,{signal:job.controller.signal});
+      }
+      const known=new Set(job.rows.map(row=>row.key));
+      for(const row of job.trackedRows || [])if(!known.has(row.key)) {
+        if(job.rows.length>=maxRows)throw Error('A consulta e os produtos acompanhados ultrapassam o limite de produtos. Refine os links.');
+        job.rows.push(decorate({...row,price:null,stock:null,warnings:[]}));known.add(row.key);
       }
       await completeDetails(job,reader);
       job.complete=true;
@@ -179,6 +190,17 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
   function start(actor,body) {
     const job=create(actor,body);launch(job);
     return summary(job);
+  }
+  async function scan(actor,body,{signal,onProgress,trackedRows=[],interactive=false}={}) {
+    const job=create(actor,{...body,productDetails:true,allPages:true});
+    job.backgroundUser=actor.id;job.onProgress=onProgress;job.trackedRows=trackedRows;job.interactive=interactive;
+    const abort=()=>job.controller.abort(signal.reason);
+    if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+    try {
+      launch(job);await job.promise;
+      if(job.status!=='ready' || !job.complete)throw Error(job.error || 'A consulta não foi concluída.');
+      return summary(job,true);
+    } finally {signal?.removeEventListener('abort',abort);jobs.delete(job.id);}
   }
   function fromHtml(actor,body) {
     const job=create(actor,{...body,allPages:false,productDetails:body.productDetails===true});
@@ -259,8 +281,10 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
           }
           const saved=ops.saveProduct(actor,product,old?.id);
           if(old && old.stock!==product.stock)ops.stockMove(actor,saved,product.stock-old.stock,'Importação do site confirmada','site_import');
-          run(`INSERT INTO web_product_sources(source_key,product_id,source_url,imported_at) VALUES(?,?,?,?)
-            ON CONFLICT(source_key) DO UPDATE SET product_id=excluded.product_id,source_url=excluded.source_url,imported_at=excluded.imported_at`,row.key,saved.id,row.url,now());
+          run(`INSERT INTO web_product_sources(source_key,product_id,source_url,imported_at,last_stock,observed_at,observation_version) VALUES(?,?,?,?,?,?,1)
+            ON CONFLICT(source_key) DO UPDATE SET product_id=excluded.product_id,source_url=excluded.source_url,imported_at=excluded.imported_at,
+              last_stock=COALESCE(excluded.last_stock,web_product_sources.last_stock),observed_at=excluded.observed_at,
+              observation_version=web_product_sources.observation_version+1`,row.key,saved.id,row.url,now(),row.stock,now());
           if(old)updated++;else created++;
           appliedKeys.push(row.key);
         }
@@ -276,6 +300,6 @@ function createController({readerFactory=createPageReader,imageLoader=downloadIm
     for(const job of jobs.values())job.controller.abort();
     await Promise.allSettled([...jobs.values()].map(job=>job.promise || Promise.resolve()));
   }
-  return {start,fromHtml,status,cancel,apply,close};
+  return {start,fromHtml,status,cancel,apply,scan,close};
 }
-module.exports={createController,validateRow,fingerprint,MAX_BATCH};
+module.exports={createController,validateRow,fingerprint,existing,MAX_BATCH};

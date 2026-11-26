@@ -3,10 +3,10 @@ const {snapshot}=require('./backup');
 
 function migrate(db,file,existing) {
   const version=db.prepare('PRAGMA user_version').get().user_version;
-  if (version>=5) return;
+  if (version>=6) return;
   if (existing && file!==':memory:') {
     const dir=resolve(process.env.PDV_BACKUP_DIR || join(dirname(file),'backups'));
-    console.log('Backup pré-migração:',snapshot(db,dir,'pre-migracao-v5'));
+    console.log('Backup pré-migração:',snapshot(db,dir,'pre-migracao-v6'));
   }
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -147,7 +147,33 @@ function migrate(db,file,existing) {
       );
       CREATE INDEX web_product_sources_product ON web_product_sources(product_id);
     `);
-    db.exec('PRAGMA user_version=5');
+    if (version<6) db.exec(`
+      ALTER TABLE web_product_sources ADD COLUMN last_stock INTEGER;
+      ALTER TABLE web_product_sources ADD COLUMN observed_at TEXT;
+      ALTER TABLE web_product_sources ADD COLUMN observation_version INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE site_sync_jobs (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, category TEXT NOT NULL,
+        interval_minutes INTEGER NOT NULL, enabled INTEGER NOT NULL, create_new INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL REFERENCES users(id), revision INTEGER NOT NULL DEFAULT 1,
+        deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        next_run TEXT, last_started TEXT, last_finished TEXT, status TEXT NOT NULL DEFAULT 'idle', message TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX site_sync_jobs_due ON site_sync_jobs(enabled,deleted,next_run);
+      CREATE TABLE site_sync_runs (
+        id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES site_sync_jobs(id),
+        started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
+        message TEXT NOT NULL DEFAULT '', total INTEGER NOT NULL DEFAULT 0,
+        created INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0,
+        baselines INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0,
+        conflicts INTEGER NOT NULL DEFAULT 0, report TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE INDEX site_sync_runs_job ON site_sync_runs(job_id,id DESC);
+      CREATE TABLE site_sync_members (
+        job_id INTEGER NOT NULL REFERENCES site_sync_jobs(id), source_key TEXT NOT NULL REFERENCES web_product_sources(source_key),
+        PRIMARY KEY(job_id,source_key)
+      );
+    `);
+    db.exec('PRAGMA user_version=6');
     if (db.prepare('PRAGMA foreign_key_check').get()) throw Error('A migração encontrou referências inválidas.');
     db.exec('COMMIT');
   } catch (error) {

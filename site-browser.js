@@ -8,7 +8,7 @@ const {setTimeout:delay}=require('node:timers/promises');
 const {chromium}=require('playwright-core');
 const {storeUrl,imageUrl,parsePage,sameListing,sameProduct}=require('./site-catalog');
 const pageReady=(parsed,url,options={})=>options.productDetails?
-  parsed.rows.some(row=>sameProduct(url,row.url) && row.price!=null && row.stock!=null):parsed.rows.length>0;
+  parsed.rows.some(row=>sameProduct(url,row.url) && row.price!=null && row.stock!=null):parsed.rows.length>0 || options.allowEmpty===true && parsed.listing;
 function retryAfterMs(value,now=Date.now()) {
   const raw=String(value ?? '').trim();
   const milliseconds=raw && /^\d+(?:\.\d+)?$/.test(raw)?Number(raw)*1000:raw?Date.parse(raw)-now:NaN;
@@ -141,7 +141,7 @@ class CatalogBrowser {
     } else if(this.child && this.child.exitCode===null) this.child.kill();
   }
 }
-function createPageReader({directory,signal,onWaiting,headless=false,allowTestUrl=false,downloadPage=download,wait=delay}={}) {
+function createPageReader({directory,signal,onWaiting,headless=false,allowTestUrl=false,downloadPage=download,wait=delay,interactive=true}={}) {
   let browser;
   return {
     async read(url,options) {
@@ -164,6 +164,7 @@ function createPageReader({directory,signal,onWaiting,headless=false,allowTestUr
           return html;
         }
         if(![200,403,503].includes(response.status))throw Error('O site respondeu com erro HTTP '+response.status+'.');
+        if(!interactive)throw Object.assign(Error('O site exige verificação no navegador. Use Verificar com navegador para esta consulta; o estoque foi preservado.'),{code:'SITE_VERIFICATION_REQUIRED'});
         onWaiting?.('O site exige um navegador. Conclua a verificação na janela que será aberta no computador.');
         browser=new CatalogBrowser({directory,signal,onWaiting,headless,allowTestUrl});
       }
